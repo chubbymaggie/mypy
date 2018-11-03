@@ -1,18 +1,16 @@
 """Identity AST transform test cases"""
 
 import os.path
-from typing import List
 
 from mypy import build
-from mypy.build import BuildSource
+from mypy.modulefinder import BuildSource
 from mypy.test.helpers import (
     assert_string_arrays_equal, testfile_pyversion, normalize_error_messages
 )
 from mypy.test.data import DataDrivenTestCase, DataSuite
 from mypy.test.config import test_temp_dir
+from mypy.test.visitors import TypeAssertTransformVisitor
 from mypy.errors import CompileError
-from mypy.treetransform import TransformVisitor
-from mypy.types import Type
 from mypy.options import Options
 
 
@@ -73,9 +71,3 @@ def test_transform(testcase: DataDrivenTestCase) -> None:
         testcase.output, a,
         'Invalid semantic analyzer output ({}, line {})'.format(testcase.file,
                                                                 testcase.line))
-
-
-class TypeAssertTransformVisitor(TransformVisitor):
-    def type(self, type: Type) -> Type:
-        assert type is not None
-        return type

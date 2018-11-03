@@ -3,7 +3,7 @@
 Using installed packages
 ========================
 
-`PEP 561 <https://www.python.org/dev/peps/pep-0561/>`_ specifies how to mark
+`PEP 561 <https://www.python.org/dev/peps/pep-0561/>`__ specifies how to mark
 a package as supporting type checking. Below is a summary of how to create
 PEP 561 compatible packages and have mypy use them in type checking.
 
@@ -25,10 +25,17 @@ the correct package directory. If that fails, you can use the
 find packages installed for that Python executable.
 
 Note that mypy does not support some more advanced import features, such as zip
-imports, namespace packages, and custom import hooks.
+imports and custom import hooks.
 
 If you do not want to use typed packages, use the ``--no-site-packages`` flag
 to disable searching.
+
+Note that stub-only packages (defined in
+`PEP 561 <https://www.python.org/dev/peps/pep-0561/#stub-only-packages>`__)
+cannot be used with ``MYPYPATH``. If you want mypy to find the package, it must
+be installed. For a package ``foo``, the name of the stub-only package
+(``foo-stubs``) is not a legal package name, so mypy will not find it, unless
+it is installed.
 
 Making PEP 561 compatible packages
 **********************************
@@ -43,7 +50,7 @@ If you would like to publish a library package to a package repository (e.g.
 PyPI) for either internal or external use in type checking, packages that
 supply type information via type comments or annotations in the code should put
 a ``py.typed`` in their package directory. For example, with a directory
-structure as follows:
+structure as follows
 
 .. code-block:: text
 
@@ -53,7 +60,7 @@ structure as follows:
         lib.py
         py.typed
 
-the setup.py might look like:
+the setup.py might look like
 
 .. code-block:: python
 
@@ -67,8 +74,13 @@ the setup.py might look like:
         packages=["package_a"]
     )
 
+.. note::
+
+   If you use setuptools, you must pass the option ``zip_safe=False`` to
+   ``setup()``, or mypy will not be able to find the installed package.
+
 Some packages have a mix of stub files and runtime files. These packages also
-require a ``py.typed`` file. An example can be seen below:
+require a ``py.typed`` file. An example can be seen below
 
 .. code-block:: text
 
@@ -94,7 +106,7 @@ the setup.py might look like:
     )
 
 In this example, both ``lib.py`` and ``lib.pyi`` exist. At runtime, the Python
-interpeter will use ``lib.py``, but mypy will use ``lib.pyi`` instead.
+interpreter will use ``lib.py``, but mypy will use ``lib.pyi`` instead.
 
 If the package is stub-only (not imported at runtime), the package should have
 a prefix of the runtime package name and a suffix of ``-stubs``.

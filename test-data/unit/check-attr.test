@@ -187,10 +187,10 @@ class A:
 reveal_type(A)  # E: Revealed type is 'def (a: builtins.int) -> __main__.A'
 reveal_type(A.__eq__)  # E: Revealed type is 'def (self: __main__.A, other: builtins.object) -> builtins.bool'
 reveal_type(A.__ne__)  # E: Revealed type is 'def (self: __main__.A, other: builtins.object) -> builtins.bool'
-reveal_type(A.__lt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(A.__le__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(A.__gt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(A.__ge__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
+reveal_type(A.__lt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(A.__le__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(A.__gt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(A.__ge__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
 
 A(1) < A(2)
 A(1) <= A(2)
@@ -367,6 +367,19 @@ A([1], '2')  # E: Cannot infer type argument 1 of "A"
 
 [builtins fixtures/list.pyi]
 
+[case testAttrsGenericClassmethod]
+from typing import TypeVar, Generic, Optional
+import attr
+T = TypeVar('T')
+@attr.s(auto_attribs=True)
+class A(Generic[T]):
+    x: Optional[T]
+    @classmethod
+    def clsmeth(cls) -> None:
+       reveal_type(cls)  # E: Revealed type is 'Type[__main__.A[T`1]]'
+
+[builtins fixtures/classmethod.pyi]
+
 [case testAttrsForwardReference]
 import attr
 @attr.s(auto_attribs=True)
@@ -416,7 +429,7 @@ class A:
     b: str = attr.ib()
     @classmethod
     def new(cls) -> A:
-       reveal_type(cls)  # E: Revealed type is 'def (a: builtins.int, b: builtins.str) -> __main__.A'
+       reveal_type(cls)  # E: Revealed type is 'Type[__main__.A]'
        return cls(6, 'hello')
     @classmethod
     def bad(cls) -> A:
@@ -426,6 +439,38 @@ class A:
 reveal_type(A)  # E: Revealed type is 'def (a: builtins.int, b: builtins.str) -> __main__.A'
 a = A.new()
 reveal_type(a.foo) # E: Revealed type is 'def () -> builtins.int'
+[builtins fixtures/classmethod.pyi]
+
+[case testAttrsOtherOverloads]
+import attr
+from typing import overload, Union
+
+@attr.s
+class A:
+    a = attr.ib()
+    b = attr.ib(default=3)
+
+    @classmethod
+    def other(cls) -> str:
+        return "..."
+
+    @overload
+    @classmethod
+    def foo(cls, x: int) -> int: ...
+
+    @overload
+    @classmethod
+    def foo(cls, x: str) -> str: ...
+
+    @classmethod
+    def foo(cls, x: Union[int, str]) -> Union[int, str]:
+        reveal_type(cls)            # E: Revealed type is 'Type[__main__.A]'
+        reveal_type(cls.other())    # E: Revealed type is 'builtins.str'
+        return x
+
+reveal_type(A.foo(3))      # E: Revealed type is 'builtins.int'
+reveal_type(A.foo("foo"))  # E: Revealed type is 'builtins.str'
+
 [builtins fixtures/classmethod.pyi]
 
 [case testAttrsDefaultDecorator]
@@ -622,23 +667,23 @@ class C(A, B): pass
 @attr.s
 class D(A): pass
 
-reveal_type(A.__lt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(B.__lt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(C.__lt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
-reveal_type(D.__lt__)  # E: Revealed type is 'def [AT] (self: AT`1, other: AT`1) -> builtins.bool'
+reveal_type(A.__lt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(B.__lt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(C.__lt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
+reveal_type(D.__lt__)  # E: Revealed type is 'def [AT] (self: AT`-1, other: AT`-1) -> builtins.bool'
 
 A() < A()
 B() < B()
-A() < B() # E: Unsupported operand types for > ("B" and "A")
+A() < B() # E: Unsupported operand types for < ("A" and "B")
 
 C() > A()
 C() > B()
 C() > C()
-C() > D() # E: Unsupported operand types for < ("D" and "C")
+C() > D() # E: Unsupported operand types for > ("C" and "D")
 
 D() >= A()
-D() >= B()  # E: Unsupported operand types for <= ("B" and "D")
-D() >= C()  # E: Unsupported operand types for <= ("C" and "D")
+D() >= B()  # E: Unsupported operand types for >= ("D" and "B")
+D() >= C()  # E: Unsupported operand types for >= ("D" and "C")
 D() >= D()
 
 A() <= 1  # E: Unsupported operand types for <= ("A" and "int")
@@ -857,3 +902,35 @@ class C:
    e = attr.ib()  # E: Non-default attributes not allowed after default attributes.
 
 [builtins fixtures/bool.pyi]
+
+[case testAttrsOptionalConverter]
+# flags: --strict-optional
+import attr
+from attr.converters import optional
+from typing import Optional
+
+def converter(s:int) -> str:
+    return 'hello'
+
+
+@attr.s
+class A:
+    y: Optional[int] = attr.ib(converter=optional(int))
+    z: Optional[str] = attr.ib(converter=optional(converter))
+
+
+A(None, None)
+
+[builtins fixtures/attr.pyi]
+
+[case testAttrsTypeVarNoCollision]
+from typing import TypeVar, Generic
+import attr
+
+T = TypeVar("T", bytes, str)
+
+# Make sure the generated __le__ (and friends) don't use T for their arguments.
+@attr.s(auto_attribs=True)
+class A(Generic[T]):
+    v: T
+[builtins fixtures/attr.pyi]

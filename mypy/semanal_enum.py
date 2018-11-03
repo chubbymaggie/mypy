@@ -3,7 +3,7 @@
 This is conceptually part of mypy.semanal (semantic analyzer pass 2).
 """
 
-from typing import List, Tuple, Optional, cast
+from typing import List, Tuple, Optional, Union, cast
 
 from mypy.nodes import (
     Expression, Context, TypeInfo, AssignmentStmt, NameExpr, CallExpr, RefExpr, StrExpr,
@@ -36,7 +36,7 @@ class EnumCallAnalyzer:
 
     def check_enum_call(self,
                         node: Expression,
-                        var_name: Optional[str],
+                        var_name: str,
                         is_func_scope: bool) -> Optional[TypeInfo]:
         """Check if a call defines an Enum.
 
@@ -62,8 +62,8 @@ class EnumCallAnalyzer:
         items, values, ok = self.parse_enum_call_args(call, fullname.split('.')[-1])
         if not ok:
             # Error. Construct dummy return value.
-            return self.build_enum_call_typeinfo('Enum', [], fullname)
-        name = cast(StrExpr, call.args[0]).value
+            return self.build_enum_call_typeinfo(var_name, [], fullname)
+        name = cast(Union[StrExpr, UnicodeExpr], call.args[0]).value
         if name != var_name or is_func_scope:
             # Give it a unique name derived from the line number.
             name += '@' + str(call.line)
@@ -112,7 +112,8 @@ class EnumCallAnalyzer:
         elif isinstance(args[1], (TupleExpr, ListExpr)):
             seq_items = args[1].items
             if all(isinstance(seq_item, (StrExpr, UnicodeExpr)) for seq_item in seq_items):
-                items = [cast(StrExpr, seq_item).value for seq_item in seq_items]
+                items = [cast(Union[StrExpr, UnicodeExpr], seq_item).value
+                         for seq_item in seq_items]
             elif all(isinstance(seq_item, (TupleExpr, ListExpr))
                      and len(seq_item.items) == 2
                      and isinstance(seq_item.items[0], (StrExpr, UnicodeExpr))

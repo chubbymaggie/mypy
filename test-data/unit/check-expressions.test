@@ -537,9 +537,9 @@ class B:
     def __gt__(self, o: 'B') -> bool: pass
 [builtins fixtures/bool.pyi]
 [out]
-main:3: error: Unsupported operand types for > ("A" and "A")
-main:5: error: Unsupported operand types for > ("A" and "A")
+main:3: error: Unsupported operand types for < ("A" and "A")
 main:5: error: Unsupported operand types for < ("A" and "A")
+main:5: error: Unsupported operand types for > ("A" and "A")
 
 
 [case testChainedCompBoolRes]
@@ -664,7 +664,7 @@ A() + cast(Any, 1)
 class C:
     def __gt__(self, x: 'A') -> object: pass
 class A:
-    def __lt__(self, x: C) -> int: pass
+    def __lt__(self, x: C) -> int: pass  # E: Signatures of "__lt__" of "A" and "__gt__" of "C" are unsafely overlapping
 class B:
     def __gt__(self, x: A) -> str: pass
 s = None  # type: str
@@ -673,6 +673,10 @@ n = A() < C()
 s = A() < B()
 n = A() < B() # E: Incompatible types in assignment (expression has type "str", variable has type "int")
 s = object() < B() # E: Unsupported operand types for > ("B" and "object")
+
+[case testReversibleComparisonWithExtraArgument]
+class C:
+    def __lt__(self, o: object, x: str = "") -> int: ...
 
 [case testErrorContextAndBinaryOperators]
 import typing
@@ -866,7 +870,10 @@ from typing import overload
 a, b, c = None, None, None  # type: (A, B, C)
 a[b]
 a[c]
-a[1]  # E: No overload variant of "__getitem__" of "A" matches argument type "int"
+a[1]  # E: No overload variant of "__getitem__" of "A" matches argument type "int" \
+      # N: Possible overload variants: \
+      # N:     def __getitem__(self, B) -> int \
+      # N:     def __getitem__(self, C) -> str
 
 i, s = None, None  # type: (int, str)
 i = a[b]
@@ -931,6 +938,7 @@ a, o = None, None # type: (A, object)
 a = f()         # E: "f" does not return a value
 o = a()         # E: Function does not return a value
 o = A().g(a)    # E: "g" of "A" does not return a value
+o = A.g(a, a)   # E: "g" of "A" does not return a value
 A().g(f())      # E: "f" does not return a value
 x: A = f()      # E: "f" does not return a value
 f()
@@ -1658,8 +1666,8 @@ it = [('x', 1)]
 d = dict(it, x=1)
 d() # E: "Dict[str, int]" not callable
 
-d2 = dict(it, x='') # E: Cannot infer type argument 2 of "dict"
-d2() # E: "Dict[Any, Any]" not callable
+d2 = dict(it, x='')
+d2() # E: "Dict[str, object]" not callable
 
 d3 = dict(it, x='') # type: Dict[str, int] # E: Argument "x" to "dict" has incompatible type "str"; expected "int"
 [builtins fixtures/dict.pyi]
@@ -1683,8 +1691,8 @@ d = dict(it, **kw)
 d() # E: "Dict[str, int]" not callable
 
 kw2 = {'x': ''}
-d2 = dict(it, **kw2) # E: Cannot infer type argument 2 of "dict"
-d2() # E: "Dict[Any, Any]" not callable
+d2 = dict(it, **kw2)
+d2() # E: "Dict[str, object]" not callable
 
 d3 = dict(it, **kw2) # type: Dict[str, int] # E: Argument 2 to "dict" has incompatible type "**Dict[str, str]"; expected "int"
 [builtins fixtures/dict.pyi]

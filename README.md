@@ -1,8 +1,11 @@
+<img src="http://mypy-lang.org/static/mypy_light.svg" alt="mypy logo" width="300px"/>
+
 Mypy: Optional Static Typing for Python
 =======================================
 
 [![Build Status](https://api.travis-ci.org/python/mypy.svg?branch=master)](https://travis-ci.org/python/mypy)
 [![Chat at https://gitter.im/python/typing](https://badges.gitter.im/python/typing.svg)](https://gitter.im/python/typing?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 
 
 Got a question? Join us on Gitter!
@@ -218,7 +221,12 @@ whenever you change branches, merge, rebase, or pull.
 Tests
 -----
 
-See [Test README.md](test-data/unit/README.md)
+The basic way to run tests:
+
+    $ pip3 install -r test-requirements.txt
+    $ ./runtests.py
+
+For more on the tests, see [Test README.md](test-data/unit/README.md)
 
 
 Development status

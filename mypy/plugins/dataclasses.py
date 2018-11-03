@@ -1,24 +1,27 @@
 from collections import OrderedDict
-from typing import Dict, List, Optional, Set, Tuple, cast
+from typing import Dict, List, Set, Tuple
 
 from mypy.nodes import (
-    ARG_OPT, ARG_POS, MDEF, Argument, AssignmentStmt, Block, CallExpr,
+    ARG_OPT, ARG_POS, MDEF, Argument, AssignmentStmt, CallExpr,
     Context, Decorator, Expression, FuncDef, JsonDict, NameExpr,
-    SymbolTableNode, TempNode, TypeInfo, Var,
+    OverloadedFuncDef, SymbolTableNode, TempNode, TypeInfo, Var,
 )
 from mypy.plugin import ClassDefContext
-from mypy.plugins.common import _add_method, _get_decorator_bool_argument
+from mypy.plugins.common import add_method, _get_decorator_bool_argument
 from mypy.types import (
-    CallableType, Instance, NoneTyp, Type, TypeVarDef, TypeVarType,
-    deserialize_type
+    CallableType, Instance, NoneTyp, Overloaded, TypeVarDef, TypeVarType,
 )
-from mypy.typevars import fill_typevars
+from mypy.server.trigger import make_trigger, make_wildcard_trigger
+
+MYPY = False
+if MYPY:
+    from typing_extensions import Final
 
 # The set of decorators that generate dataclasses.
 dataclass_makers = {
     'dataclass',
     'dataclasses.dataclass',
-}
+}  # type: Final
 
 
 class DataclassAttribute:
@@ -84,32 +87,25 @@ class DataclassTransformer:
         }
 
         if decorator_arguments['init']:
-            _add_method(
+            add_method(
                 ctx,
                 '__init__',
                 args=[attr.to_argument(info) for attr in attributes if attr.is_in_init],
                 return_type=NoneTyp(),
             )
-            for stmt in self._ctx.cls.defs.body:
-                # Fix up the types of classmethods since, by default,
-                # they will be based on the parent class' init.
-                if isinstance(stmt, Decorator) and stmt.func.is_class:
-                    func_type = stmt.func.type
-                    if isinstance(func_type, CallableType):
-                        func_type.arg_types[0] = self._ctx.api.class_type(self._ctx.cls.info)
 
         # Add an eq method, but only if the class doesn't already have one.
         if decorator_arguments['eq'] and info.get('__eq__') is None:
             for method_name in ['__eq__', '__ne__']:
                 # The TVar is used to enforce that "other" must have
                 # the same type as self (covariant).  Note the
-                # "self_type" parameter to _add_method.
+                # "self_type" parameter to add_method.
                 obj_type = ctx.api.named_type('__builtins__.object')
-                cmp_tvar_def = TypeVarDef('T', 'T', 1, [], obj_type)
+                cmp_tvar_def = TypeVarDef('T', 'T', -1, [], obj_type)
                 cmp_other_type = TypeVarType(cmp_tvar_def)
                 cmp_return_type = ctx.api.named_type('__builtins__.bool')
 
-                _add_method(
+                add_method(
                     ctx,
                     method_name,
                     args=[Argument(Var('other', cmp_other_type), cmp_other_type, None, ARG_POS)],
@@ -127,7 +123,7 @@ class DataclassTransformer:
                 # Like for __eq__ and __ne__, we want "other" to match
                 # the self type.
                 obj_type = ctx.api.named_type('__builtins__.object')
-                order_tvar_def = TypeVarDef('T', 'T', 1, [], obj_type)
+                order_tvar_def = TypeVarDef('T', 'T', -1, [], obj_type)
                 order_other_type = TypeVarType(order_tvar_def)
                 order_return_type = ctx.api.named_type('__builtins__.bool')
                 order_args = [
@@ -142,7 +138,7 @@ class DataclassTransformer:
                         existing_method.node,
                     )
 
-                _add_method(
+                add_method(
                     ctx,
                     method_name,
                     args=order_args,
@@ -243,6 +239,9 @@ class DataclassTransformer:
         for info in cls.info.mro[1:-1]:
             if 'dataclass' not in info.metadata:
                 continue
+
+            # Each class depends on the set of attributes in its dataclass ancestors.
+            ctx.api.add_plugin_dependency(make_wildcard_trigger(info.fullname()))
 
             for name, data in info.metadata['dataclass']['attributes'].items():
                 if name not in known_attrs:

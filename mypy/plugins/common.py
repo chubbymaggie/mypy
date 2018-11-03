@@ -1,7 +1,7 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from mypy.nodes import (
-    ARG_OPT, ARG_POS, MDEF, Argument, Block, CallExpr, Expression, FuncBase,
+    ARG_POS, MDEF, Argument, Block, CallExpr, Expression, FuncBase,
     FuncDef, PassStmt, RefExpr, SymbolTableNode, Var
 )
 from mypy.plugin import ClassDefContext
@@ -47,11 +47,15 @@ def _get_argument(call: CallExpr, name: str) -> Optional[Expression]:
     #
     # Note: I'm not hard-coding the index so that in the future we can support other
     # attrib and class makers.
+    if not isinstance(call.callee, RefExpr):
+        return None
+
     callee_type = None
-    if (isinstance(call.callee, RefExpr)
-            and isinstance(call.callee.node, (Var, FuncBase))
-            and call.callee.node.type):
-        callee_node_type = call.callee.node.type
+    # mypyc hack to workaround mypy misunderstanding multiple inheritance (#3603)
+    callee_node = call.callee.node  # type: Any
+    if (isinstance(callee_node, (Var, FuncBase))
+            and callee_node.type):
+        callee_node_type = callee_node.type
         if isinstance(callee_node_type, Overloaded):
             # We take the last overload.
             callee_type = callee_node_type.items()[-1]
@@ -74,7 +78,7 @@ def _get_argument(call: CallExpr, name: str) -> Optional[Expression]:
     return None
 
 
-def _add_method(
+def add_method(
         ctx: ClassDefContext,
         name: str,
         args: List[Argument],
@@ -106,5 +110,5 @@ def _add_method(
     func._fullname = info.fullname() + '.' + name
     func.line = info.line
 
-    info.names[name] = SymbolTableNode(MDEF, func)
+    info.names[name] = SymbolTableNode(MDEF, func, plugin_generated=True)
     info.defn.defs.body.append(func)

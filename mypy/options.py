@@ -3,52 +3,60 @@ import re
 import pprint
 import sys
 
-from typing import Dict, List, Mapping, MutableMapping, Optional, Pattern, Set, Tuple
+from typing import Dict, List, Mapping, Optional, Pattern, Set, Tuple
+MYPY = False
+if MYPY:
+    from typing_extensions import Final
 
 from mypy import defaults
+from mypy.util import get_class_descriptors, replace_object_state
 
 
 class BuildType:
-    STANDARD = 0
-    MODULE = 1
-    PROGRAM_TEXT = 2
+    STANDARD = 0  # type: Final[int]
+    MODULE = 1  # type: Final[int]
+    PROGRAM_TEXT = 2  # type: Final[int]
+
+
+PER_MODULE_OPTIONS = {
+    # Please keep this list sorted
+    "allow_untyped_globals",
+    "always_false",
+    "always_true",
+    "check_untyped_defs",
+    "debug_cache",
+    "disallow_any_decorated",
+    "disallow_any_explicit",
+    "disallow_any_expr",
+    "disallow_any_generics",
+    "disallow_any_unimported",
+    "disallow_incomplete_defs",
+    "disallow_subclassing_any",
+    "disallow_untyped_calls",
+    "disallow_untyped_decorators",
+    "disallow_untyped_defs",
+    "follow_imports",
+    "follow_imports_for_stubs",
+    "ignore_errors",
+    "ignore_missing_imports",
+    "local_partial_types",
+    "mypyc",
+    "no_implicit_optional",
+    "show_none_errors",
+    "strict_optional",
+    "strict_optional_whitelist",
+    "warn_no_return",
+    "warn_return_any",
+    "warn_unused_ignores",
+}  # type: Final
+
+OPTIONS_AFFECTING_CACHE = ((PER_MODULE_OPTIONS |
+                            {"quick_and_dirty", "platform", "bazel"})
+                           - {"debug_cache"})  # type: Final
 
 
 class Options:
     """Options collected from flags."""
-
-    PER_MODULE_OPTIONS = {
-        "ignore_missing_imports",
-        "follow_imports",
-        "follow_imports_for_stubs",
-        "disallow_any_generics",
-        "disallow_any_unimported",
-        "disallow_any_expr",
-        "disallow_any_decorated",
-        "disallow_any_explicit",
-        "disallow_subclassing_any",
-        "disallow_untyped_calls",
-        "disallow_untyped_defs",
-        "check_untyped_defs",
-        "debug_cache",
-        "strict_optional_whitelist",
-        "show_none_errors",
-        "warn_no_return",
-        "warn_return_any",
-        "warn_unused_ignores",
-        "ignore_errors",
-        "strict_boolean",
-        "no_implicit_optional",
-        "always_true",
-        "always_false",
-        "strict_optional",
-        "disallow_untyped_decorators",
-        "local_partial_types",
-    }
-
-    OPTIONS_AFFECTING_CACHE = ((PER_MODULE_OPTIONS |
-                                {"quick_and_dirty", "platform", "bazel"})
-                               - {"debug_cache"})
 
     def __init__(self) -> None:
         # Cache for clone_for_module()
@@ -65,11 +73,15 @@ class Options:
         self.custom_typeshed_dir = None  # type: Optional[str]
         self.mypy_path = []  # type: List[str]
         self.report_dirs = {}  # type: Dict[str, str]
+        # Show errors in PEP 561 packages/site-packages modules
+        self.no_silence_site_packages = False
         self.ignore_missing_imports = False
         self.follow_imports = 'normal'  # normal|silent|skip|error
         # Whether to respect the follow_imports setting even for stub files.
         # Intended to be used for disabling specific stubs.
-        self.follow_imports_for_stubs = False  # type: bool
+        self.follow_imports_for_stubs = False
+        # PEP 420 namespace packages
+        self.namespace_packages = False
 
         # disallow_any options
         self.disallow_any_generics = False
@@ -118,9 +130,6 @@ class Options:
         # Files in which to ignore all non-fatal errors
         self.ignore_errors = False
 
-        # Only allow booleans in conditions
-        self.strict_boolean = False
-
         # Apply strict None checking
         self.strict_optional = True
 
@@ -136,6 +145,9 @@ class Options:
 
         # Don't assume arguments with default values of None are Optional
         self.no_implicit_optional = False
+
+        # Suppress toplevel errors caused by missing annotations
+        self.allow_untyped_globals = False
 
         # Variable names considered True
         self.always_true = []  # type: List[str]
@@ -164,6 +176,10 @@ class Options:
         # Read cache files in fine-grained incremental mode (cache must include dependencies)
         self.use_fine_grained_cache = False
 
+        # Tune certain behaviors when being used as a front-end to mypyc. Set per-module
+        # in modules being compiled. Not in the config file or command line.
+        self.mypyc = False
+
         # Paths of user plugins
         self.plugins = []  # type: List[str]
 
@@ -176,6 +192,7 @@ class Options:
         self.verbosity = 0  # More verbose messages (for troubleshooting)
         self.pdb = False
         self.show_traceback = False
+        self.raise_exceptions = False
         self.dump_type_stats = False
         self.dump_inference_stats = False
 
@@ -187,38 +204,43 @@ class Options:
         self.use_builtins_fixtures = False
 
         # -- experimental options --
-        self.shadow_file = None  # type: Optional[List[Tuple[str, str]]]
+        self.shadow_file = None  # type: Optional[List[List[str]]]
         self.show_column_numbers = False  # type: bool
         self.dump_graph = False
         self.dump_deps = False
+        self.logical_deps = False
         # If True, partial types can't span a module top level and a function
         self.local_partial_types = False
         # Some behaviors are changed when using Bazel (https://bazel.build).
         self.bazel = False
+        # If True, export inferred types for all expressions as BuildResult.types
+        self.export_types = False
         # List of package roots -- directories under these are packages even
         # if they don't have __init__.py.
         self.package_root = []  # type: List[str]
         self.cache_map = {}  # type: Dict[str, Tuple[str, str]]
+        # Don't properly free objects on exit, just kill the current process.
+        self.fast_exit = False
 
     def snapshot(self) -> object:
         """Produce a comparable snapshot of this Option"""
-        d = dict(self.__dict__)
+        # Under mypyc, we don't have a __dict__, so we need to do worse things.
+        d = dict(getattr(self, '__dict__', ()))
+        for k in get_class_descriptors(Options):
+            if hasattr(self, k):
+                d[k] = getattr(self, k)
         del d['per_module_cache']
         return d
-
-    def __eq__(self, other: object) -> bool:
-        return self.__class__ == other.__class__ and self.__dict__ == other.__dict__
-
-    def __ne__(self, other: object) -> bool:
-        return not self == other
 
     def __repr__(self) -> str:
         return 'Options({})'.format(pprint.pformat(self.snapshot()))
 
     def apply_changes(self, changes: Dict[str, object]) -> 'Options':
         new_options = Options()
-        new_options.__dict__.update(self.__dict__)
-        new_options.__dict__.update(changes)
+        # Under mypyc, we don't have a __dict__, so we need to do worse things.
+        replace_object_state(new_options, self, copy_dict=True)
+        for key, value in changes.items():
+            setattr(new_options, key, value)
         return new_options
 
     def build_per_module_cache(self) -> None:
@@ -274,7 +296,7 @@ class Options:
         """
         if self.per_module_cache is None:
             self.build_per_module_cache()
-            assert self.per_module_cache is not None
+        assert self.per_module_cache is not None
 
         # If the module just directly has a config entry, use it.
         if module in self.per_module_cache:
@@ -316,8 +338,8 @@ class Options:
         parts = s.split('.')
         expr = re.escape(parts[0]) if parts[0] != '*' else '.*'
         for part in parts[1:]:
-            expr += re.escape('.' + part) if part != '*' else '(\..*)?'
+            expr += re.escape('.' + part) if part != '*' else r'(\..*)?'
         return re.compile(expr + '\\Z')
 
     def select_options_affecting_cache(self) -> Mapping[str, object]:
-        return {opt: getattr(self, opt) for opt in self.OPTIONS_AFFECTING_CACHE}
+        return {opt: getattr(self, opt) for opt in OPTIONS_AFFECTING_CACHE}

@@ -41,6 +41,7 @@ import json
 import os
 import os.path
 import pkgutil
+import inspect
 import subprocess
 import sys
 import textwrap
@@ -48,14 +49,16 @@ import traceback
 from collections import defaultdict
 
 from typing import (
-    Any, List, Dict, Tuple, Iterable, Iterator, Mapping, Optional, NamedTuple, Set, Union, cast
+    Any, List, Dict, Tuple, Iterable, Iterator, Mapping, Optional, NamedTuple, Set, cast
 )
 
 import mypy.build
 import mypy.parse
 import mypy.errors
 import mypy.traverser
+import mypy.util
 from mypy import defaults
+from mypy.modulefinder import FindModuleCache, SearchPaths
 from mypy.nodes import (
     Expression, IntExpr, UnaryExpr, StrExpr, BytesExpr, NameExpr, FloatExpr, MemberExpr, TupleExpr,
     ListExpr, ComparisonExpr, CallExpr, IndexExpr, EllipsisExpr,
@@ -63,14 +66,18 @@ from mypy.nodes import (
     IfStmt, ReturnStmt, ImportAll, ImportFrom, Import, FuncDef, FuncBase, TempNode,
     ARG_POS, ARG_STAR, ARG_STAR2, ARG_NAMED, ARG_NAMED_OPT,
 )
-from mypy.stubgenc import parse_all_signatures, find_unique_signatures, generate_stub_for_c_module
-from mypy.stubutil import is_c_module, write_header
+from mypy.stubgenc import generate_stub_for_c_module
+from mypy.stubutil import is_c_module, write_header, parse_all_signatures, find_unique_signatures
 from mypy.options import Options as MypyOptions
 from mypy.types import (
-    Type, TypeStrVisitor, AnyType, CallableType,
+    Type, TypeStrVisitor, CallableType,
     UnboundType, NoneTyp, TupleType, TypeList,
 )
 from mypy.visitor import NodeVisitor
+
+MYPY = False
+if MYPY:
+    from typing_extensions import Final
 
 Options = NamedTuple('Options', [('pyversion', Tuple[int, int]),
                                  ('no_import', bool),
@@ -160,8 +167,8 @@ def find_module_path_and_all(module: str, pyversion: Tuple[int, int],
             module_all = getattr(mod, '__all__', None)
     else:
         # Find module by going through search path.
-        module_path = mypy.build.FindModuleCache().find_module(module, ('.',) + tuple(search_path),
-                                                               interpreter)
+        search_paths = SearchPaths(('.',) + tuple(search_path), (), (), ())
+        module_path = FindModuleCache(search_paths).find_module(module)
         if not module_path:
             raise SystemExit(
                 "Can't find module '{}' (consider using --search-path)".format(module))
@@ -205,7 +212,6 @@ def generate_stub(path: str,
                   pyversion: Tuple[int, int] = defaults.PYTHON3_VERSION,
                   include_private: bool = False
                   ) -> None:
-
     with open(path, 'rb') as f:
         data = f.read()
     source = mypy.util.decode_python_encoding(data, pyversion)
@@ -234,12 +240,12 @@ def generate_stub(path: str,
 
 # What was generated previously in the stub file. We keep track of these to generate
 # nicely formatted output (add empty line between non-empty classes, for example).
-EMPTY = 'EMPTY'
-FUNC = 'FUNC'
-CLASS = 'CLASS'
-EMPTY_CLASS = 'EMPTY_CLASS'
-VAR = 'VAR'
-NOT_IN_ALL = 'NOT_IN_ALL'
+EMPTY = 'EMPTY'  # type: Final
+FUNC = 'FUNC'  # type: Final
+CLASS = 'CLASS'  # type: Final
+EMPTY_CLASS = 'EMPTY_CLASS'  # type: Final
+VAR = 'VAR'  # type: Final
+NOT_IN_ALL = 'NOT_IN_ALL'  # type: Final
 
 
 class AnnotationPrinter(TypeStrVisitor):
@@ -248,7 +254,7 @@ class AnnotationPrinter(TypeStrVisitor):
         super().__init__()
         self.stubgen = stubgen
 
-    def visit_unbound_type(self, t: UnboundType)-> str:
+    def visit_unbound_type(self, t: UnboundType) -> str:
         s = t.name
         base = s.split('.')[0]
         self.stubgen.import_tracker.require_name(base)
@@ -342,7 +348,7 @@ class ImportTracker:
             if alias:
                 self.reverse_alias[alias] = name
 
-    def add_import(self, module: str, alias: Optional[str]=None) -> None:
+    def add_import(self, module: str, alias: Optional[str] = None) -> None:
         name = module.split('.')[0]
         self.module_for[alias or name] = None
         self.direct_imports[name] = module
@@ -587,7 +593,7 @@ class StubGenerator(mypy.traverser.TraverserVisitor):
                     if init:
                         found = True
                         if not sep and not self._indent and \
-                           self._state not in (EMPTY, VAR):
+                                self._state not in (EMPTY, VAR):
                             init = '\n' + init
                             sep = True
                         self.add(init)
@@ -619,7 +625,7 @@ class StubGenerator(mypy.traverser.TraverserVisitor):
         self.add('%s = namedtuple(%s, %s)\n' % (lvalue.name, name, items))
         self._state = CLASS
 
-    def is_type_expression(self, expr: Expression, top_level: bool=True) -> bool:
+    def is_type_expression(self, expr: Expression, top_level: bool = True) -> bool:
         """Return True for things that look like type expressions
 
         Used to know if assignments look like typealiases
@@ -789,7 +795,7 @@ class StubGenerator(mypy.traverser.TraverserVisitor):
         if isinstance(rvalue, NameExpr) and rvalue.name in ('True', 'False'):
             return 'bool'
         if can_infer_optional and \
-           isinstance(rvalue, NameExpr) and rvalue.name == 'None':
+                isinstance(rvalue, NameExpr) and rvalue.name == 'None':
             self.add_typing_import('Optional')
             self.add_typing_import('Any')
             return 'Optional[Any]'
@@ -817,29 +823,33 @@ class StubGenerator(mypy.traverser.TraverserVisitor):
         return self.is_top_level() and name in self._toplevel_names
 
 
+class SelfTraverser(mypy.traverser.TraverserVisitor):
+    def __init__(self) -> None:
+        self.results = []  # type: List[Tuple[str, Expression]]
+
+    def visit_assignment_stmt(self, o: AssignmentStmt) -> None:
+        lvalue = o.lvalues[0]
+        if (isinstance(lvalue, MemberExpr) and
+                isinstance(lvalue.expr, NameExpr) and
+                lvalue.expr.name == 'self'):
+            self.results.append((lvalue.name, o.rvalue))
+
+
 def find_self_initializers(fdef: FuncBase) -> List[Tuple[str, Expression]]:
-    results = []  # type: List[Tuple[str, Expression]]
+    traverser = SelfTraverser()
+    fdef.accept(traverser)
+    return traverser.results
 
-    class SelfTraverser(mypy.traverser.TraverserVisitor):
-        def visit_assignment_stmt(self, o: AssignmentStmt) -> None:
-            lvalue = o.lvalues[0]
-            if (isinstance(lvalue, MemberExpr) and
-                    isinstance(lvalue.expr, NameExpr) and
-                    lvalue.expr.name == 'self'):
-                results.append((lvalue.name, o.rvalue))
 
-    fdef.accept(SelfTraverser())
-    return results
+class ReturnSeeker(mypy.traverser.TraverserVisitor):
+    def __init__(self) -> None:
+        self.found = False
+
+    def visit_return_stmt(self, o: ReturnStmt) -> None:
+        self.found = True
 
 
 def has_return_statement(fdef: FuncBase) -> bool:
-    class ReturnSeeker(mypy.traverser.TraverserVisitor):
-        def __init__(self) -> None:
-            self.found = False
-
-        def visit_return_stmt(self, o: ReturnStmt) -> None:
-            self.found = True
-
     seeker = ReturnSeeker()
     fdef.accept(seeker)
     return seeker.found
@@ -855,20 +865,43 @@ def get_qualified_name(o: Expression) -> str:
 
 
 def walk_packages(packages: List[str]) -> Iterator[str]:
+    """Iterates through all packages and sub-packages in the given list.
+
+    Python packages have a __path__ attribute defined, which pkgutil uses to determine
+    the package hierarchy.  However, packages in C extensions do not have this attribute,
+    so we have to roll out our own.
+    """
     for package_name in packages:
         package = importlib.import_module(package_name)
         yield package.__name__
+        # get the path of the object (needed by pkgutil)
         path = getattr(package, '__path__', None)
         if path is None:
+            # object has no path; this means it's either a module inside a package
+            # (and thus no sub-packages), or it could be a C extension package.
+            if is_c_module(package):
+                # This is a C extension module, now get the list of all sub-packages
+                # using the inspect module
+                subpackages = [package.__name__ + "." + name
+                               for name, val in inspect.getmembers(package)
+                               if inspect.ismodule(val)]
+                # recursively iterate through the subpackages
+                for submodule in walk_packages(subpackages):
+                    yield submodule
             # It's a module inside a package.  There's nothing else to walk/yield.
-            continue
-        for importer, qualified_name, ispkg in pkgutil.walk_packages(path,
-                                                                     prefix=package.__name__ + ".",
-                                                                     onerror=lambda r: None):
-            yield qualified_name
+        else:
+            all_packages = pkgutil.walk_packages(path, prefix=package.__name__ + ".",
+                                                 onerror=lambda r: None)
+            for importer, qualified_name, ispkg in all_packages:
+                yield qualified_name
 
 
 def main() -> None:
+    # Make sure that the current directory is in sys.path so that
+    # stubgen can be run on packages in the current directory.
+    if '' not in sys.path:
+        sys.path.insert(0, '')
+
     options = parse_options(sys.argv[1:])
     if not os.path.isdir(options.output_dir):
         raise SystemExit('Directory "{}" does not exist'.format(options.output_dir))
@@ -978,7 +1011,7 @@ def default_python2_interpreter() -> str:
     raise SystemExit("Can't find a Python 2 interpreter -- please use the -p option")
 
 
-def usage(exit_nonzero: bool=True) -> None:
+def usage(exit_nonzero: bool = True) -> None:
     usage = textwrap.dedent("""\
         usage: stubgen [--py2] [--no-import] [--doc-dir PATH]
                        [--search-path PATH] [-p PATH] [-o PATH]

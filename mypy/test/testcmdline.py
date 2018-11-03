@@ -58,6 +58,13 @@ def test_python_cmdline(testcase: DataDrivenTestCase) -> None:
     outb = process.stdout.read()
     # Split output into lines.
     out = [s.rstrip('\n\r') for s in str(outb, 'utf8').splitlines()]
+
+    if "PYCHARM_HOSTED" in os.environ:
+        pos = next((p for p, i in enumerate(out) if i.startswith('pydev debugger: ')), None)
+        if pos is not None:
+            del out[pos]  # the attaching debugger message itself
+            del out[pos]  # plus the extra new line added
+
     result = process.wait()
     # Remove temp file.
     os.remove(program_path)
@@ -71,7 +78,7 @@ def test_python_cmdline(testcase: DataDrivenTestCase) -> None:
                 actual_output_content = output_file.read().splitlines()
             normalized_output = normalize_file_output(actual_output_content,
                                                       os.path.abspath(test_temp_dir))
-            if testcase.native_sep and os.path.sep == '\\':
+            if testcase.suite.native_sep and os.path.sep == '\\':
                 normalized_output = [fix_cobertura_filename(line) for line in normalized_output]
             normalized_output = normalize_error_messages(normalized_output)
             assert_string_arrays_equal(expected_content.splitlines(), normalized_output,
@@ -106,7 +113,7 @@ def parse_args(line: str) -> List[str]:
 
 def normalize_file_output(content: List[str], current_abs_path: str) -> List[str]:
     """Normalize file output for comparison."""
-    timestamp_regex = re.compile('\d{10}')
+    timestamp_regex = re.compile(r'\d{10}')
     result = [x.replace(current_abs_path, '$PWD') for x in content]
     result = [re.sub(r'\b' + re.escape(__version__) + r'\b', '$VERSION', x) for x in result]
     result = [re.sub(r'\b' + re.escape(base_version) + r'\b', '$VERSION', x) for x in result]

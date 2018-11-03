@@ -4,128 +4,113 @@ Additional features
 This section discusses various features that did not fit in naturally in one
 of the previous sections.
 
-.. _function-overloading:
+.. _dataclasses_support:
 
-Function overloading
-********************
+Dataclasses
+***********
 
-Sometimes the types in a function depend on each other in ways that
-can't be captured with a ``Union``.  For example, the ``__getitem__``
-(``[]`` bracket indexing) method can take an integer and return a
-single item, or take a ``slice`` and return a ``Sequence`` of items.
-You might be tempted to annotate it like so:
+In Python 3.7, a new ``dataclasses`` module has been added to the standard library.
+This module allows defining and customizing simple boilerplate-free classes.
+They can be defined using the ``@dataclasses.dataclass`` decorator:
 
 .. code-block:: python
 
-    from typing import Sequence, TypeVar, Union
-    T = TypeVar('T')
+    from dataclasses import dataclass, field
 
-    class MyList(Sequence[T]):
-        def __getitem__(self, index: Union[int, slice]) -> Union[T, Sequence[T]]:
-            if isinstance(index, int):
-                ...  # Return a T here
-            elif isinstance(index, slice):
-                ...  # Return a sequence of Ts here
-            else:
-                raise TypeError(...)
+    @dataclass
+    class Application:
+        name: str
+        plugins: List[str] = field(default_factory=list)
 
-But this is too loose, as it implies that when you pass in an ``int``
-you might sometimes get out a single item and sometimes a sequence.
-The return type depends on the parameter type in a way that can't be
-expressed using a type variable.  Instead, we can use `overloading
-<https://www.python.org/dev/peps/pep-0484/#function-method-overloading>`_
-to give the same function multiple type annotations (signatures) and
-accurately describe the function's behavior.
+    test = Application("Testing...")  # OK
+    bad = Application("Testing...", "with plugin")  # Error: List[str] expected
+
+Mypy will detect special methods (such as ``__lt__``) depending on the flags used to
+define dataclasses. For example:
 
 .. code-block:: python
 
-    from typing import overload, Sequence, TypeVar, Union
+    from dataclasses import dataclass
+
+    @dataclass(order=True)
+    class OrderedPoint:
+        x: int
+        y: int
+
+    @dataclass(order=False)
+    class UnorderedPoint:
+        x: int
+        y: int
+
+    OrderedPoint(1, 2) < OrderedPoint(3, 4)  # OK
+    UnorderedPoint(1, 2) < UnorderedPoint(3, 4)  # Error: Unsupported operand types
+
+Dataclasses can be generic and can be used in any other way a normal
+class can be used:
+
+.. code-block:: python
+
+    from dataclasses import dataclass
+    from typing import Generic, TypeVar
+
     T = TypeVar('T')
 
-    class MyList(Sequence[T]):
+    @dataclass
+    class BoxedData(Generic[T]):
+        data: T
+        label: str
 
-        # The @overload definitions are just for the type checker,
-        # and overwritten by the real implementation below.
-        @overload
-        def __getitem__(self, index: int) -> T:
-            pass  # Don't put code here
+    def unbox(bd: BoxedData[T]) -> T:
+        ...
 
-        # All overloads and the implementation must be adjacent
-        # in the source file, and overload order may matter:
-        # when two overloads may overlap, the more specific one
-        # should come first.
-        @overload
-        def __getitem__(self, index: slice) -> Sequence[T]:
-            pass  # Don't put code here
+    val = unbox(BoxedData(42, "<important>"))  # OK, inferred type is int
 
-        # The implementation goes last, without @overload.
-        # It may or may not have type hints; if it does,
-        # these are checked against the overload definitions
-        # as well as against the implementation body.
-        def __getitem__(self, index: Union[int, slice]) -> Union[T, Sequence[T]]:
-            # This is exactly the same as before.
-            if isinstance(index, int):
-                ...  # Return a T here
-            elif isinstance(index, slice):
-                ...  # Return a sequence of Ts here
-            else:
-                raise TypeError(...)
+For more information see `official docs <https://docs.python.org/3/library/dataclasses.html>`_
+and `PEP 557 <https://www.python.org/dev/peps/pep-0557/>`_.
 
-Calls to overloaded functions are type checked against the variants,
-not against the implementation. A call like ``my_list[5]`` would have
-type ``T``, not ``Union[T, Sequence[T]]`` because it matches the
-first overloaded definition, and ignores the type annotations on the
-implementation of ``__getitem__``. The code in the body of the
-definition of ``__getitem__`` is checked against the annotations on
-the corresponding declaration. In this case the body is checked
-with ``index: Union[int, slice]`` and a return type
-``Union[T, Sequence[T]]``. If there are no annotations on the
-corresponding definition, then code in the function body is not type
-checked.
+Caveats/Known Issues
+====================
 
-The annotations on the function body must be compatible with the
-types given for the overloaded variants listed above it. The type
-checker will verify that all the types for the overloaded variants
-are compatible with the types given for the implementation. In this
-case it checks that the parameter type ``int`` and the return type
-``T`` are compatible with ``Union[int, slice]`` and
-``Union[T, Sequence[T]]`` for the first variant. For the second
-variant it verifies that the parameter type ``slice`` and the return
-type ``Sequence[T]`` are compatible with ``Union[int, slice]`` and
-``Union[T, Sequence[T]]``.
+Some functions in the ``dataclasses`` module, such as ``replace()`` and ``asdict()``,
+have imprecise (too permissive) types. This will be fixed in future releases.
 
-Overloaded function variants are still ordinary Python functions and
-they still define a single runtime object. There is no automatic
-dispatch happening, and you must manually handle the different types
-in the implementation (usually with :func:`isinstance` checks, as
-shown in the example).
+Mypy does not yet recognize aliases of ``dataclasses.dataclass``, and will
+probably never recognize dynamically computed decorators. The following examples
+do **not** work:
 
-The overload variants must be adjacent in the code. This makes code
-clearer, as you don't have to hunt for overload variants across the
-file.
+.. code-block:: python
 
-Overloads in stub files are exactly the same, except there is no
-implementation.
+    from dataclasses import dataclass
 
-.. note::
+    dataclass_alias = dataclass
+    def dataclass_wrapper(cls):
+      return dataclass(cls)
 
-   As generic type variables are erased at runtime when constructing
-   instances of generic types, an overloaded function cannot have
-   variants that only differ in a generic type argument,
-   e.g. ``List[int]`` and ``List[str]``.
+    @dataclass_alias
+    class AliasDecorated:
+      """
+      Mypy doesn't recognize this as a dataclass because it is decorated by an
+      alias of `dataclass` rather than by `dataclass` itself.
+      """
+      attribute: int
 
-.. note::
+    @dataclass_wrapper
+    class DynamicallyDecoarted:
+      """
+      Mypy doesn't recognize this as a dataclass because it is decorated by a
+      function returning `dataclass` rather than by `dataclass` itself.
+      """
+      attribute: int
 
-   If you just need to constrain a type variable to certain types or
-   subtypes, you can use a :ref:`value restriction
-   <type-variable-value-restriction>`.
+    AliasDecorated(attribute=1) # error: Unexpected keyword argument
+    DynamicallyDecoarted(attribute=1) # error: Unexpected keyword argument
 
 .. _attrs_package:
 
 The attrs package
 *****************
 
-`attrs <https://www.attrs.org/en/stable>`_ is a package that lets you define
+`attrs <http://www.attrs.org/en/stable>`_ is a package that lets you define
 classes without writing boilerplate code. Mypy can detect uses of the
 package and will generate the necessary method definitions for decorated
 classes using the type annotations it finds.
@@ -191,7 +176,7 @@ Caveats/Known Issues
   will complain about not understanding the argument and the type annotation in
   ``__init__`` will be replaced by ``Any``.
 
-* `Validator decorators <http://www.attrs.org/en/stable/examples.html#decorator>`_
+* `Validator decorators <http://www.attrs.org/en/stable/examples.html#validators>`_
   and `default decorators <http://www.attrs.org/en/stable/examples.html#defaults>`_
   are not type-checked against the attribute they are setting/validating.
 

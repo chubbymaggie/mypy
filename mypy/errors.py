@@ -2,9 +2,8 @@ import os.path
 import sys
 import traceback
 from collections import OrderedDict, defaultdict
-from contextlib import contextmanager
 
-from typing import Tuple, List, TypeVar, Set, Dict, Iterator, Optional, cast
+from typing import Tuple, List, TypeVar, Set, Dict, Optional
 
 from mypy.scope import Scope
 from mypy.options import Options
@@ -106,10 +105,10 @@ class Errors:
     import_ctx = None  # type: List[Tuple[str, int]]
 
     # Path name prefix that is removed from all paths, if set.
-    ignore_prefix = None  # type: str
+    ignore_prefix = None  # type: Optional[str]
 
     # Path to current file.
-    file = None  # type: str
+    file = ''  # type: str
 
     # Ignore errors on these lines of each file.
     ignored_lines = None  # type: Dict[str, Set[int]]
@@ -221,7 +220,7 @@ class Errors:
 
     def report(self,
                line: int,
-               column: int,
+               column: Optional[int],
                message: str,
                blocker: bool = False,
                severity: str = 'error',
@@ -249,6 +248,8 @@ class Errors:
             type = None
             function = None
 
+        if column is None:
+            column = -1
         if file is None:
             file = self.file
         if offset:
@@ -548,7 +549,7 @@ class CompileError(Exception):
         self.module_with_blocker = module_with_blocker
 
 
-def remove_path_prefix(path: str, prefix: str) -> str:
+def remove_path_prefix(path: str, prefix: Optional[str]) -> str:
     """If path starts with prefix, return copy of path with the prefix removed.
     Otherwise, return path. If path is None, return None.
     """
@@ -594,6 +595,8 @@ def report_internal_error(err: Exception, file: Optional[str], line: int,
         pdb.post_mortem(sys.exc_info()[2])
 
     # If requested, print traceback, else print note explaining how to get one.
+    if options.raise_exceptions:
+        raise err
     if not options.show_traceback:
         if not options.pdb:
             print('{}: note: please use --show-traceback to print a traceback '

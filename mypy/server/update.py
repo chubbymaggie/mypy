@@ -112,27 +112,24 @@ This is module is tested using end-to-end fine-grained incremental mode
 test cases (test-data/unit/fine-grained*.test).
 """
 
-import os
 import time
-import os.path
 from typing import (
-    Dict, List, Set, Tuple, Iterable, Union, Optional, Mapping, NamedTuple, Callable,
+    Dict, List, Set, Tuple, Iterable, Union, Optional, NamedTuple, Callable,
     Sequence
 )
 
 from mypy.build import (
-    BuildManager, State, BuildSource, BuildResult, Graph, load_graph, module_not_found,
-    process_fresh_modules,
-    PRI_INDIRECT, DEBUG_FINE_GRAINED,
+    BuildManager, State, BuildResult, Graph, load_graph,
+    process_fresh_modules, DEBUG_FINE_GRAINED,
 )
-from mypy.checker import DeferredNode
-from mypy.errors import Errors, CompileError
+from mypy.modulefinder import BuildSource
+from mypy.checker import FineGrainedDeferredNode
+from mypy.errors import CompileError
 from mypy.nodes import (
-    MypyFile, FuncDef, TypeInfo, Expression, SymbolNode, Var, FuncBase, ClassDef, Decorator,
-    Import, ImportFrom, OverloadedFuncDef, SymbolTable, LambdaExpr
+    MypyFile, FuncDef, TypeInfo, SymbolNode, Decorator,
+    OverloadedFuncDef, SymbolTable, LambdaExpr
 )
 from mypy.options import Options
-from mypy.types import Type
 from mypy.fscache import FileSystemCache
 from mypy.semanal import apply_semantic_analyzer_patches
 from mypy.server.astdiff import (
@@ -145,8 +142,12 @@ from mypy.server.target import module_prefix, split_target
 from mypy.server.trigger import make_trigger, WILDCARD_TAG
 from mypy.typestate import TypeState
 
+MYPY = False
+if MYPY:
+    from typing_extensions import Final
 
-MAX_ITER = 1000
+
+MAX_ITER = 1000  # type: Final
 
 
 class FineGrainedBuildManager:
@@ -526,7 +527,14 @@ def update_module_isolated(module: str,
 
     # Process the changed file.
     state.parse_file()
+    assert state.tree is not None, "file must be at least parsed"
     # TODO: state.fix_suppressed_dependencies()?
+    if module == 'typing':
+        # We need to manually add typing aliases to builtins, like we
+        # do in process_stale_scc. Because this can't be done until
+        # builtins is also loaded, there isn't an obvious way to
+        # refactor this.
+        manager.semantic_analyzer.add_builtin_aliases(state.tree)
     try:
         state.semantic_analysis()
     except CompileError as err:
@@ -537,7 +545,6 @@ def update_module_isolated(module: str,
     state.semantic_analysis_apply_patches()
 
     # Merge old and new ASTs.
-    assert state.tree is not None, "file must be at least parsed"
     new_modules_dict = {module: state.tree}  # type: Dict[str, Optional[MypyFile]]
     replace_modules_with_new_variants(manager, graph, {orig_module: orig_tree}, new_modules_dict)
 
@@ -774,7 +781,7 @@ def find_targets_recursive(
         graph: Graph,
         triggers: Set[str],
         deps: Dict[str, Set[str]],
-        up_to_date_modules: Set[str]) -> Tuple[Dict[str, Set[DeferredNode]],
+        up_to_date_modules: Set[str]) -> Tuple[Dict[str, Set[FineGrainedDeferredNode]],
                                                Set[str], Set[TypeInfo]]:
     """Find names of all targets that need to reprocessed, given some triggers.
 
@@ -782,7 +789,7 @@ def find_targets_recursive(
      * Dictionary from module id to a set of stale targets.
      * A set of module ids for unparsed modules with stale targets.
     """
-    result = {}  # type: Dict[str, Set[DeferredNode]]
+    result = {}  # type: Dict[str, Set[FineGrainedDeferredNode]]
     worklist = triggers
     processed = set()  # type: Set[str]
     stale_protos = set()  # type: Set[TypeInfo]
@@ -828,7 +835,7 @@ def find_targets_recursive(
 def reprocess_nodes(manager: BuildManager,
                     graph: Dict[str, State],
                     module_id: str,
-                    nodeset: Set[DeferredNode],
+                    nodeset: Set[FineGrainedDeferredNode],
                     deps: Dict[str, Set[str]]) -> Set[str]:
     """Reprocess a set of nodes within a single module.
 
@@ -844,7 +851,7 @@ def reprocess_nodes(manager: BuildManager,
     old_symbols = {name: names.copy() for name, names in old_symbols.items()}
     old_symbols_snapshot = snapshot_symbol_table(file_node.fullname(), file_node.names)
 
-    def key(node: DeferredNode) -> int:
+    def key(node: FineGrainedDeferredNode) -> int:
         # Unlike modules which are sorted by name within SCC,
         # nodes within the same module are sorted by line number, because
         # this is how they are processed in normal mode.
@@ -953,7 +960,7 @@ def find_symbol_tables_recursive(prefix: str, symbols: SymbolTable) -> Dict[str,
 
 
 def update_deps(module_id: str,
-                nodes: List[DeferredNode],
+                nodes: List[FineGrainedDeferredNode],
                 graph: Dict[str, State],
                 deps: Dict[str, Set[str]],
                 options: Options) -> None:
@@ -971,7 +978,7 @@ def update_deps(module_id: str,
 
 
 def lookup_target(manager: BuildManager,
-                  target: str) -> Tuple[List[DeferredNode], Optional[TypeInfo]]:
+                  target: str) -> Tuple[List[FineGrainedDeferredNode], Optional[TypeInfo]]:
     """Look up a target by fully-qualified name.
 
     The first item in the return tuple is a list of deferred nodes that
@@ -1006,6 +1013,11 @@ def lookup_target(manager: BuildManager,
                 or c not in node.names):
             not_found()  # Stale dependency
             return [], None
+        # Don't reprocess plugin generated targets. They should get
+        # stripped and regenerated when the containing target is
+        # reprocessed.
+        if node.names[c].plugin_generated:
+            return [], None
         node = node.names[c].node
     if isinstance(node, TypeInfo):
         # A ClassDef target covers the body of the class and everything defined
@@ -1019,7 +1031,7 @@ def lookup_target(manager: BuildManager,
             # a deserialized TypeInfo with missing attributes.
             not_found()
             return [], None
-        result = [DeferredNode(file, None, None)]
+        result = [FineGrainedDeferredNode(file, None, None)]
         stale_info = None  # type: Optional[TypeInfo]
         if node.is_protocol:
             stale_info = node
@@ -1044,7 +1056,7 @@ def lookup_target(manager: BuildManager,
         # context will be wrong and it could be a partially initialized deserialized node.
         not_found()
         return [], None
-    return [DeferredNode(node, active_class_name, active_class)], None
+    return [FineGrainedDeferredNode(node, active_class_name, active_class)], None
 
 
 def is_verbose(manager: BuildManager) -> bool:
@@ -1052,7 +1064,7 @@ def is_verbose(manager: BuildManager) -> bool:
 
 
 def target_from_node(module: str,
-                     node: Union[FuncDef, MypyFile, OverloadedFuncDef, LambdaExpr]
+                     node: Union[FuncDef, MypyFile, OverloadedFuncDef]
                      ) -> Optional[str]:
     """Return the target name corresponding to a deferred node.
 
@@ -1067,10 +1079,8 @@ def target_from_node(module: str,
             # Actually a reference to another module -- likely a stale dependency.
             return None
         return module
-    elif isinstance(node, (OverloadedFuncDef, FuncDef)):
-        if node.info is not None:
+    else:  # OverloadedFuncDef or FuncDef
+        if node.info:
             return '%s.%s' % (node.info.fullname(), node.name())
         else:
             return '%s.%s' % (module, node.name())
-    else:
-        assert False, "Lambda expressions can't be deferred in fine-grained incremental mode"

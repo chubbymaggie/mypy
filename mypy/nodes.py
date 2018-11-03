@@ -4,16 +4,20 @@ import os
 from abc import abstractmethod
 from collections import OrderedDict, defaultdict
 from typing import (
-    Any, TypeVar, List, Tuple, cast, Set, Dict, Union, Optional, Callable, Sequence
+    Any, TypeVar, List, Tuple, cast, Set, Dict, Union, Optional, Callable, Sequence,
 )
+from mypy_extensions import trait
 
 MYPY = False
 if MYPY:
     from typing import DefaultDict
+    from typing_extensions import Final
 
 import mypy.strconv
 from mypy.util import short_type
 from mypy.visitor import NodeVisitor, StatementVisitor, ExpressionVisitor
+
+from mypy.bogus_type import Bogus
 
 
 class Context:
@@ -47,7 +51,7 @@ class Context:
         return self.column
 
 
-if False:
+if MYPY:
     # break import cycle only needed for mypy
     import mypy.types
 
@@ -61,30 +65,29 @@ JsonDict = Dict[str, Any]
 #
 # TODO rename to use more descriptive names
 
-LDEF = 0  # type: int
-GDEF = 1  # type: int
-MDEF = 2  # type: int
-MODULE_REF = 3  # type: int
+LDEF = 0  # type: Final[int]
+GDEF = 1  # type: Final[int]
+MDEF = 2  # type: Final[int]
+MODULE_REF = 3  # type: Final[int]
 # Type variable declared using TypeVar(...) has kind TVAR. It's not
 # valid as a type unless bound in a TypeVarScope.  That happens within:
 # (1) a generic class that uses the type variable as a type argument or
 # (2) a generic function that refers to the type variable in its signature.
-TVAR = 4  # type: int
+TVAR = 4  # type: Final[int]
 
-TYPE_ALIAS = 6  # type: int
 # Placeholder for a name imported via 'from ... import'. Second phase of
 # semantic will replace this the actual imported reference. This is
 # needed so that we can detect whether a name has been imported during
 # XXX what?
-UNBOUND_IMPORTED = 7  # type: int
+UNBOUND_IMPORTED = 5  # type: Final[int]
 
 # RevealExpr node kinds
-REVEAL_TYPE = 0  # type: int
-REVEAL_LOCALS = 1  # type: int
+REVEAL_TYPE = 0  # type: Final[int]
+REVEAL_LOCALS = 1  # type: Final[int]
 
-LITERAL_YES = 2
-LITERAL_TYPE = 1
-LITERAL_NO = 0
+LITERAL_YES = 2  # type: Final
+LITERAL_TYPE = 1  # type: Final
+LITERAL_NO = 0  # type: Final
 
 node_kinds = {
     LDEF: 'Ldef',
@@ -92,43 +95,40 @@ node_kinds = {
     MDEF: 'Mdef',
     MODULE_REF: 'ModuleRef',
     TVAR: 'Tvar',
-    TYPE_ALIAS: 'TypeAlias',
     UNBOUND_IMPORTED: 'UnboundImported',
-}
-inverse_node_kinds = {_kind: _name for _name, _kind in node_kinds.items()}
+}  # type: Final
+inverse_node_kinds = {_kind: _name for _name, _kind in node_kinds.items()}  # type: Final
 
 
 implicit_module_attrs = {'__name__': '__builtins__.str',
                          '__doc__': None,  # depends on Python version, see semanal.py
                          '__file__': '__builtins__.str',
-                         '__package__': '__builtins__.str'}
+                         '__package__': '__builtins__.str'}  # type: Final
 
 
+# These aliases exist because built-in class objects are not subscriptable.
+# For example `list[int]` fails at runtime. Instead List[int] should be used.
 type_aliases = {
-    'typing.List': '__builtins__.list',
-    'typing.Dict': '__builtins__.dict',
-    'typing.Set': '__builtins__.set',
-    'typing.FrozenSet': '__builtins__.frozenset',
-}
+    'typing.List': 'builtins.list',
+    'typing.Dict': 'builtins.dict',
+    'typing.Set': 'builtins.set',
+    'typing.FrozenSet': 'builtins.frozenset',
+    'typing.ChainMap': 'collections.ChainMap',
+    'typing.Counter': 'collections.Counter',
+    'typing.DefaultDict': 'collections.defaultdict',
+    'typing.Deque': 'collections.deque',
+}  # type: Final
 
-reverse_type_aliases = dict((name.replace('__builtins__', 'builtins'), alias)
-                            for alias, name in type_aliases.items())  # type: Dict[str, str]
-
-collections_type_aliases = {
-    'typing.ChainMap': '__mypy_collections__.ChainMap',
-    'typing.Counter': '__mypy_collections__.Counter',
-    'typing.DefaultDict': '__mypy_collections__.defaultdict',
-    'typing.Deque': '__mypy_collections__.deque',
-}
-
-reverse_collection_aliases = dict((name.replace('__mypy_collections__', 'collections'), alias)
-                                  for alias, name in
-                                  collections_type_aliases.items())  # type: Dict[str, str]
+reverse_builtin_aliases = {
+    'builtins.list': 'typing.List',
+    'builtins.dict': 'typing.Dict',
+    'builtins.set': 'typing.Set',
+    'builtins.frozenset': 'typing.FrozenSet',
+}  # type: Final
 
 nongen_builtins = {'builtins.tuple': 'typing.Tuple',
-                   'builtins.enumerate': ''}
-nongen_builtins.update(reverse_type_aliases)
-nongen_builtins.update(reverse_collection_aliases)
+                   'builtins.enumerate': ''}  # type: Final
+nongen_builtins.update((name, alias) for alias, name in type_aliases.items())
 
 
 class Node(Context):
@@ -146,6 +146,7 @@ class Node(Context):
         raise RuntimeError('Not implemented')
 
 
+@trait
 class Statement(Node):
     """A statement node."""
 
@@ -155,6 +156,7 @@ class Statement(Node):
         raise RuntimeError('Not implemented')
 
 
+@trait
 class Expression(Node):
     """An expression node."""
 
@@ -170,6 +172,7 @@ class Expression(Node):
 Lvalue = Expression
 
 
+@trait
 class SymbolNode(Node):
     """Nodes that can be stored in a symbol table."""
 
@@ -180,8 +183,11 @@ class SymbolNode(Node):
     @abstractmethod
     def name(self) -> str: pass
 
+    # fullname can often be None even though the type system
+    # disagrees. We mark this with Bogus to let mypyc know not to
+    # worry about it.
     @abstractmethod
-    def fullname(self) -> str: pass
+    def fullname(self) -> Bogus[str]: pass
 
     @abstractmethod
     def serialize(self) -> JsonDict: pass
@@ -198,10 +204,8 @@ class SymbolNode(Node):
 class MypyFile(SymbolNode):
     """The abstract syntax tree of a single source file."""
 
-    # Module name ('__main__' for initial file)
-    _name = None      # type: str
     # Fully qualified module name
-    _fullname = None  # type: str
+    _fullname = None  # type: Bogus[str]
     # Path to the file (None if not known)
     path = ''
     # Top-level definitions and statements
@@ -219,6 +223,12 @@ class MypyFile(SymbolNode):
     is_stub = False
     # Is this loaded from the cache and thus missing the actual body of the file?
     is_cache_skeleton = False
+    # Does this represent an __init__.pyi stub with a module __getattr__
+    # (i.e. a partial stub package), for such packages we suppress any missing
+    # module errors in addition to missing attribute errors.
+    is_partial_stub_package = False
+    # Plugin-created dependencies
+    plugin_deps = None  # type: Dict[str, Set[str]]
 
     def __init__(self,
                  defs: List[Statement],
@@ -231,15 +241,16 @@ class MypyFile(SymbolNode):
         self.imports = imports
         self.is_bom = is_bom
         self.alias_deps = defaultdict(set)
+        self.plugin_deps = {}
         if ignored_lines:
             self.ignored_lines = ignored_lines
         else:
             self.ignored_lines = set()
 
     def name(self) -> str:
-        return self._name
+        return '' if not self._fullname else self._fullname.split('.')[-1]
 
-    def fullname(self) -> str:
+    def fullname(self) -> Bogus[str]:
         return self._fullname
 
     def accept(self, visitor: NodeVisitor[T]) -> T:
@@ -251,22 +262,22 @@ class MypyFile(SymbolNode):
 
     def serialize(self) -> JsonDict:
         return {'.class': 'MypyFile',
-                '_name': self._name,
                 '_fullname': self._fullname,
                 'names': self.names.serialize(self._fullname),
                 'is_stub': self.is_stub,
                 'path': self.path,
+                'is_partial_stub_package': self.is_partial_stub_package,
                 }
 
     @classmethod
     def deserialize(cls, data: JsonDict) -> 'MypyFile':
         assert data['.class'] == 'MypyFile', data
         tree = MypyFile([], [])
-        tree._name = data['_name']
         tree._fullname = data['_fullname']
         tree.names = SymbolTable.deserialize(data['names'])
         tree.is_stub = data['is_stub']
         tree.path = data['path']
+        tree.is_partial_stub_package = data['is_partial_stub_package']
         tree.is_cache_skeleton = True
         return tree
 
@@ -370,6 +381,11 @@ class ImportedName(SymbolNode):
         return 'ImportedName(%s)' % self.target_fullname
 
 
+FUNCBASE_FLAGS = [
+    'is_property', 'is_class', 'is_static', 'is_final'
+]  # type: Final
+
+
 class FuncBase(Node):
     """Abstract base class for function-like nodes"""
 
@@ -377,6 +393,9 @@ class FuncBase(Node):
                  'unanalyzed_type',
                  'info',
                  'is_property',
+                 'is_class',        # Uses "@classmethod"
+                 'is_static',       # Uses "@staticmethod"
+                 'is_final',        # Uses "@final"
                  '_fullname',
                  )
 
@@ -389,16 +408,19 @@ class FuncBase(Node):
         self.unanalyzed_type = None  # type: Optional[mypy.types.Type]
         # If method, reference to TypeInfo
         # TODO: Type should be Optional[TypeInfo]
-        self.info = cast(TypeInfo, None)
+        self.info = FUNC_NO_INFO
         self.is_property = False
+        self.is_class = False
+        self.is_static = False
+        self.is_final = False
         # Name with module prefix
         # TODO: Type should be Optional[str]
-        self._fullname = cast(str, None)
+        self._fullname = cast(Bogus[str], None)
 
     @abstractmethod
     def name(self) -> str: pass
 
-    def fullname(self) -> str:
+    def fullname(self) -> Bogus[str]:
         return self._fullname
 
 
@@ -416,17 +438,25 @@ class OverloadedFuncDef(FuncBase, SymbolNode, Statement):
     """
 
     items = None  # type: List[OverloadPart]
+    unanalyzed_items = None  # type: List[OverloadPart]
     impl = None  # type: Optional[OverloadPart]
 
     def __init__(self, items: List['OverloadPart']) -> None:
         super().__init__()
         assert len(items) > 0
         self.items = items
+        self.unanalyzed_items = items.copy()
         self.impl = None
         self.set_line(items[0].line)
+        self.is_final = False
 
     def name(self) -> str:
-        return self.items[0].name()
+        if self.items:
+            return self.items[0].name()
+        else:
+            # This may happen for malformed overload
+            assert self.impl is not None
+            return self.impl.name()
 
     def accept(self, visitor: StatementVisitor[T]) -> T:
         return visitor.visit_overloaded_func_def(self)
@@ -436,8 +466,8 @@ class OverloadedFuncDef(FuncBase, SymbolNode, Statement):
                 'items': [i.serialize() for i in self.items],
                 'type': None if self.type is None else self.type.serialize(),
                 'fullname': self._fullname,
-                'is_property': self.is_property,
-                'impl': None if self.impl is None else self.impl.serialize()
+                'impl': None if self.impl is None else self.impl.serialize(),
+                'flags': get_flags(self, FUNCBASE_FLAGS),
                 }
 
     @classmethod
@@ -451,7 +481,7 @@ class OverloadedFuncDef(FuncBase, SymbolNode, Statement):
         if data.get('type') is not None:
             res.type = mypy.types.deserialize_type(data['type'])
         res._fullname = data['fullname']
-        res.is_property = data['is_property']
+        set_flags(res, data['flags'])
         # NOTE: res.info will be set in the fixup phase.
         return res
 
@@ -481,10 +511,10 @@ class Argument(Node):
         self.variable.set_line(self.line, self.column)
 
 
-FUNCITEM_FLAGS = [
+FUNCITEM_FLAGS = FUNCBASE_FLAGS + [
     'is_overload', 'is_generator', 'is_coroutine', 'is_async_generator',
-    'is_awaitable_coroutine', 'is_static', 'is_class',
-]
+    'is_awaitable_coroutine',
+]  # type: Final
 
 
 class FuncItem(FuncBase):
@@ -503,8 +533,6 @@ class FuncItem(FuncBase):
                  'is_coroutine',  # Defined using 'async def' syntax?
                  'is_async_generator',  # Is an async def generator?
                  'is_awaitable_coroutine',  # Decorated with '@{typing,asyncio}.coroutine'?
-                 'is_static',  # Uses @staticmethod?
-                 'is_class',  # Uses @classmethod?
                  'expanded',  # Variants of function with type variables with values expanded
                  )
 
@@ -525,8 +553,6 @@ class FuncItem(FuncBase):
         self.is_coroutine = False
         self.is_async_generator = False
         self.is_awaitable_coroutine = False
-        self.is_static = False
-        self.is_class = False
         self.expanded = []  # type: List[FuncItem]
 
         self.min_args = 0
@@ -547,8 +573,8 @@ class FuncItem(FuncBase):
 
 
 FUNCDEF_FLAGS = FUNCITEM_FLAGS + [
-    'is_decorated', 'is_conditional', 'is_abstract', 'is_property',
-]
+    'is_decorated', 'is_conditional', 'is_abstract',
+]  # type: Final
 
 
 class FuncDef(FuncItem, SymbolNode, Statement):
@@ -561,7 +587,6 @@ class FuncDef(FuncItem, SymbolNode, Statement):
                  'is_decorated',
                  'is_conditional',
                  'is_abstract',
-                 'is_property',
                  'original_def',
                  )
 
@@ -575,7 +600,7 @@ class FuncDef(FuncItem, SymbolNode, Statement):
         self.is_decorated = False
         self.is_conditional = False  # Defined conditionally (within block)?
         self.is_abstract = False
-        self.is_property = False
+        self.is_final = False
         # Original conditional definition
         self.original_def = None  # type: Union[None, FuncDef, Var, Decorator]
 
@@ -617,11 +642,10 @@ class FuncDef(FuncItem, SymbolNode, Statement):
         # NOTE: ret.info is set in the fixup phase.
         ret.arg_names = data['arg_names']
         ret.arg_kinds = data['arg_kinds']
-        # Mark these as 'None' so that future uses will trigger an error
-        _dummy = None  # type: Any
-        ret.arguments = _dummy
-        ret.max_pos = _dummy
-        ret.min_args = _dummy
+        # Leave these uninitialized so that future uses will trigger an error
+        del ret.arguments
+        del ret.max_pos
+        del ret.min_args
         return ret
 
 
@@ -648,8 +672,12 @@ class Decorator(SymbolNode, Statement):
     def name(self) -> str:
         return self.func.name()
 
-    def fullname(self) -> str:
+    def fullname(self) -> Bogus[str]:
         return self.func.fullname()
+
+    @property
+    def is_final(self) -> bool:
+        return self.func.is_final
 
     @property
     def info(self) -> 'TypeInfo':
@@ -682,8 +710,8 @@ class Decorator(SymbolNode, Statement):
 VAR_FLAGS = [
     'is_self', 'is_initialized_in_class', 'is_staticmethod',
     'is_classmethod', 'is_property', 'is_settable_property', 'is_suppressed_import',
-    'is_classvar', 'is_abstract_var'
-]
+    'is_classvar', 'is_abstract_var', 'is_final', 'final_unset_in_class', 'final_set_in_init'
+]  # type: Final
 
 
 class Var(SymbolNode):
@@ -696,6 +724,7 @@ class Var(SymbolNode):
                  '_fullname',
                  'info',
                  'type',
+                 'final_value',
                  'is_self',
                  'is_ready',
                  'is_inferred',
@@ -706,6 +735,9 @@ class Var(SymbolNode):
                  'is_settable_property',
                  'is_classvar',
                  'is_abstract_var',
+                 'is_final',
+                 'final_unset_in_class',
+                 'final_set_in_init',
                  'is_suppressed_import',
                  )
 
@@ -713,9 +745,9 @@ class Var(SymbolNode):
         super().__init__()
         self._name = name   # Name without module prefix
         # TODO: Should be Optional[str]
-        self._fullname = cast(str, None)  # Name with module prefix
+        self._fullname = cast('Bogus[str]', None)  # Name with module prefix
         # TODO: Should be Optional[TypeInfo]
-        self.info = cast(TypeInfo, None)  # Defining class (for member variables)
+        self.info = VAR_NO_INFO
         self.type = type  # type: Optional[mypy.types.Type] # Declared or inferred type, or None
         # Is this the first argument to an ordinary method (usually "self")?
         self.is_self = False
@@ -732,11 +764,20 @@ class Var(SymbolNode):
         # Set to true when this variable refers to a module we were unable to
         # parse for some reason (eg a silenced module)
         self.is_suppressed_import = False
+        # Was this "variable" (rather a constant) defined as Final[...]?
+        self.is_final = False
+        # If constant value is a simple literal,
+        # store the literal value (unboxed) for the benefit of
+        # tools like mypyc.
+        self.final_value = None  # type: Optional[Union[int, float, bool, str]]
+        # Where the value was set (only for class attributes)
+        self.final_unset_in_class = False
+        self.final_set_in_init = False
 
     def name(self) -> str:
         return self._name
 
-    def fullname(self) -> str:
+    def fullname(self) -> Bogus[str]:
         return self._fullname
 
     def accept(self, visitor: StatementVisitor[T]) -> T:
@@ -751,6 +792,8 @@ class Var(SymbolNode):
                 'type': None if self.type is None else self.type.serialize(),
                 'flags': get_flags(self, VAR_FLAGS),
                 }  # type: JsonDict
+        if self.final_value is not None:
+            data['final_value'] = self.final_value
         return data
 
     @classmethod
@@ -761,6 +804,7 @@ class Var(SymbolNode):
         v = Var(name, type)
         v._fullname = data['fullname']
         set_flags(v, data['flags'])
+        v.final_value = data.get('final_value')
         return v
 
 
@@ -768,7 +812,7 @@ class ClassDef(Statement):
     """Class definition"""
 
     name = None  # type: str       # Name of the class without module prefix
-    fullname = None  # type: str   # Fully qualified name of the class
+    fullname = None  # type: Bogus[str]   # Fully qualified name of the class
     defs = None  # type: Block
     type_vars = None  # type: List[mypy.types.TypeVarDef]
     # Base class expressions (not semantically analyzed -- can be arbitrary expressions)
@@ -795,6 +839,7 @@ class ClassDef(Statement):
         self.type_vars = type_vars or []
         self.base_type_exprs = base_type_exprs or []
         self.removed_base_type_exprs = []
+        self.info = CLASSDEF_NO_INFO
         self.metaclass = metaclass
         self.decorators = []
         self.keywords = OrderedDict(keywords or [])
@@ -902,6 +947,13 @@ class AssignmentStmt(Statement):
     new_syntax = False  # type: bool
     # Does this assignment define a type alias?
     is_alias_def = False
+    # Is this a final definition?
+    # Final attributes can't be re-assigned once set, and can't be overridden
+    # in a subclass. This flag is not set if an attempted declaration was found to
+    # be invalid during semantic analysis. It is still set to `True` if
+    # a final declaration overrides another final declaration (this is checked
+    # during type checking when MROs are known).
+    is_final_def = False
 
     def __init__(self, lvalues: List[Lvalue], rvalue: Expression,
                  type: 'Optional[mypy.types.Type]' = None, new_syntax: bool = False) -> None:
@@ -953,6 +1005,8 @@ class ForStmt(Statement):
     index = None  # type: Lvalue
     # Type given by type comments for index, can be None
     index_type = None  # type: Optional[mypy.types.Type]
+    # Original, not semantically analyzed type in annotation (used for reprocessing)
+    unanalyzed_index_type = None  # type: Optional[mypy.types.Type]
     # Inferred iterable item type
     inferred_item_type = None  # type: Optional[mypy.types.Type]
     # Inferred iterator type
@@ -972,6 +1026,7 @@ class ForStmt(Statement):
         super().__init__()
         self.index = index
         self.index_type = index_type
+        self.unanalyzed_index_type = index_type
         self.expr = expr
         self.body = body
         self.else_body = else_body
@@ -1227,8 +1282,6 @@ class FloatExpr(Expression):
 class ComplexExpr(Expression):
     """Complex literal"""
 
-    value = 0.0j
-
     def __init__(self, value: complex) -> None:
         super().__init__()
         self.value = value
@@ -1263,7 +1316,7 @@ class StarExpr(Expression):
 class RefExpr(Expression):
     """Abstract base class for name-like constructs"""
 
-    __slots__ = ('kind', 'node', 'fullname', 'is_new_def', 'is_inferred_def')
+    __slots__ = ('kind', 'node', 'fullname', 'is_new_def', 'is_inferred_def', 'is_alias_rvalue')
 
     def __init__(self) -> None:
         super().__init__()
@@ -1280,6 +1333,8 @@ class RefExpr(Expression):
         # For members, after semantic analysis, this does not take base
         # classes into consideration at all; the type checker deals with these.
         self.is_inferred_def = False
+        # Is this expression appears as an rvalue of a valid type alias definition?
+        self.is_alias_rvalue = False
 
 
 class NameExpr(RefExpr):
@@ -1321,17 +1376,17 @@ class MemberExpr(RefExpr):
 # Kinds of arguments
 
 # Positional argument
-ARG_POS = 0  # type: int
+ARG_POS = 0  # type: Final[int]
 # Positional, optional argument (functions only, not calls)
-ARG_OPT = 1  # type: int
+ARG_OPT = 1  # type: Final[int]
 # *arg argument
-ARG_STAR = 2  # type: int
+ARG_STAR = 2  # type: Final[int]
 # Keyword argument x=y in call, or keyword-only function arg
-ARG_NAMED = 3  # type: int
+ARG_NAMED = 3  # type: Final[int]
 # **arg argument
-ARG_STAR2 = 4  # type: int
+ARG_STAR2 = 4  # type: Final[int]
 # In an argument list, keyword-only and also optional
-ARG_NAMED_OPT = 5
+ARG_NAMED_OPT = 5  # type: Final[int]
 
 
 class CallExpr(Expression):
@@ -1397,7 +1452,7 @@ class IndexExpr(Expression):
     base = None  # type: Expression
     index = None  # type: Expression
     # Inferred __getitem__ method type
-    method_type = None  # type: mypy.types.Type
+    method_type = None  # type: Optional[mypy.types.Type]
     # If not None, this is actually semantically a type application
     # Class[type, ...] or a type alias initializer.
     analyzed = None  # type: Union[TypeApplication, TypeAliasExpr, None]
@@ -1452,19 +1507,22 @@ op_methods = {
     '>': '__gt__',
     '<=': '__le__',
     'in': '__contains__',
-}  # type: Dict[str, str]
+}  # type: Final[Dict[str, str]]
 
-comparison_fallback_method = '__cmp__'
+op_methods_to_symbols = {v: k for (k, v) in op_methods.items()}  # type: Final
+op_methods_to_symbols['__div__'] = '/'
+
+comparison_fallback_method = '__cmp__'  # type: Final
 ops_falling_back_to_cmp = {'__ne__', '__eq__',
                            '__lt__', '__le__',
-                           '__gt__', '__ge__'}
+                           '__gt__', '__ge__'}  # type: Final
 
 
 ops_with_inplace_method = {
-    '+', '-', '*', '/', '%', '//', '**', '@', '&', '|', '^', '<<', '>>'}
+    '+', '-', '*', '/', '%', '//', '**', '@', '&', '|', '^', '<<', '>>'}  # type: Final
 
 inplace_operator_methods = set(
-    '__i' + op_methods[op][2:] for op in ops_with_inplace_method)
+    '__i' + op_methods[op][2:] for op in ops_with_inplace_method)  # type: Final
 
 reverse_op_methods = {
     '__add__': '__radd__',
@@ -1487,16 +1545,37 @@ reverse_op_methods = {
     '__ge__': '__le__',
     '__gt__': '__lt__',
     '__le__': '__ge__',
-}
+}  # type: Final
 
-normal_from_reverse_op = dict((m, n) for n, m in reverse_op_methods.items())
-reverse_op_method_set = set(reverse_op_methods.values())
+# Suppose we have some class A. When we do A() + A(), Python will only check
+# the output of A().__add__(A()) and skip calling the __radd__ method entirely.
+# This shortcut is used only for the following methods:
+op_methods_that_shortcut = {
+    '__add__',
+    '__sub__',
+    '__mul__',
+    '__div__',
+    '__truediv__',
+    '__mod__',
+    '__divmod__',
+    '__floordiv__',
+    '__pow__',
+    '__matmul__',
+    '__and__',
+    '__or__',
+    '__xor__',
+    '__lshift__',
+    '__rshift__',
+}  # type: Final
+
+normal_from_reverse_op = dict((m, n) for n, m in reverse_op_methods.items())  # type: Final
+reverse_op_method_set = set(reverse_op_methods.values())  # type: Final
 
 unary_op_methods = {
     '-': '__neg__',
     '+': '__pos__',
     '~': '__invert__',
-}
+}  # type: Final
 
 
 class OpExpr(Expression):
@@ -1650,9 +1729,9 @@ class ListExpr(Expression):
 class DictExpr(Expression):
     """Dictionary literal expression {key: value, ...}."""
 
-    items = None  # type: List[Tuple[Expression, Expression]]
+    items = None  # type: List[Tuple[Optional[Expression], Expression]]
 
-    def __init__(self, items: List[Tuple[Expression, Expression]]) -> None:
+    def __init__(self, items: List[Tuple[Optional[Expression], Expression]]) -> None:
         super().__init__()
         self.items = items
 
@@ -1816,9 +1895,9 @@ class TypeApplication(Expression):
 #
 # If T is contravariant in Foo[T], Foo[object] is a subtype of
 # Foo[int], but not vice versa.
-INVARIANT = 0  # type: int
-COVARIANT = 1  # type: int
-CONTRAVARIANT = 2  # type: int
+INVARIANT = 0  # type: Final[int]
+COVARIANT = 1  # type: Final[int]
+CONTRAVARIANT = 2  # type: Final[int]
 
 
 class TypeVarExpr(SymbolNode, Expression):
@@ -1841,7 +1920,7 @@ class TypeVarExpr(SymbolNode, Expression):
     def __init__(self, name: str, fullname: str,
                  values: List['mypy.types.Type'],
                  upper_bound: 'mypy.types.Type',
-                 variance: int=INVARIANT) -> None:
+                 variance: int = INVARIANT) -> None:
         super().__init__()
         self._name = name
         self._fullname = fullname
@@ -1880,21 +1959,22 @@ class TypeVarExpr(SymbolNode, Expression):
 class TypeAliasExpr(Expression):
     """Type alias expression (rvalue)."""
 
+    # The target type.
     type = None  # type: mypy.types.Type
-    # Simple fallback type for aliases that are invalid in runtime expressions
-    # (for example Union, Tuple, Callable).
-    fallback = None  # type: mypy.types.Type
-    # This type alias is subscripted in a runtime expression like Alias[int](42)
-    # (not in a type context like type annotation or base class).
-    in_runtime = False  # type: bool
+    # Names of unbound type variables used to define the alias
+    tvars = None  # type: List[str]
+    # Whether this alias was defined in bare form. Used to distinguish
+    # between
+    #     A = List
+    # and
+    #     A = List[Any]
+    no_args = False  # type: bool
 
-    def __init__(self, type: 'mypy.types.Type', tvars: List[str],
-                 fallback: 'mypy.types.Type', in_runtime: bool = False) -> None:
+    def __init__(self, type: 'mypy.types.Type', tvars: List[str], no_args: bool) -> None:
         super().__init__()
         self.type = type
-        self.fallback = fallback
-        self.in_runtime = in_runtime
         self.tvars = tvars
+        self.no_args = no_args
 
     def accept(self, visitor: ExpressionVisitor[T]) -> T:
         return visitor.visit_type_alias_expr(self)
@@ -1906,10 +1986,12 @@ class NamedTupleExpr(Expression):
     # The class representation of this named tuple (its tuple_type attribute contains
     # the tuple item types)
     info = None  # type: TypeInfo
+    is_typed = False  # whether this class was created with typing.NamedTuple
 
-    def __init__(self, info: 'TypeInfo') -> None:
+    def __init__(self, info: 'TypeInfo', is_typed: bool = False) -> None:
         super().__init__()
         self.info = info
+        self.is_typed = is_typed
 
     def accept(self, visitor: ExpressionVisitor[T]) -> T:
         return visitor.visit_namedtuple_expr(self)
@@ -2034,7 +2116,7 @@ class TypeInfo(SymbolNode):
     the appropriate number of arguments.
     """
 
-    _fullname = None  # type: str          # Fully qualified name
+    _fullname = None  # type: Bogus[str]          # Fully qualified name
     # Fully qualified name for the module this type was defined in. This
     # information is also in the fullname, but is harder to extract in the
     # case of nested class definitions.
@@ -2136,7 +2218,7 @@ class TypeInfo(SymbolNode):
     # type (NamedTuple or TypedDict) was generated, store the corresponding
     # TypeInfo here. (This attribute does not need to be serialized, it is only
     # needed during the semantic passes.)
-    replaced = None  # type: TypeInfo
+    replaced = None  # type: Optional[TypeInfo]
 
     # This is a dictionary that will be serialized and un-serialized as is.
     # It is useful for plugins to add their data to save in the cache.
@@ -2144,8 +2226,8 @@ class TypeInfo(SymbolNode):
 
     FLAGS = [
         'is_abstract', 'is_enum', 'fallback_to_any', 'is_named_tuple',
-        'is_newtype', 'is_protocol', 'runtime_protocol'
-    ]
+        'is_newtype', 'is_protocol', 'runtime_protocol', 'is_final',
+    ]  # type: Final[List[str]]
 
     def __init__(self, names: 'SymbolTable', defn: ClassDef, module_name: str) -> None:
         """Initialize a TypeInfo."""
@@ -2155,8 +2237,7 @@ class TypeInfo(SymbolNode):
         self.module_name = module_name
         self.type_vars = []
         self.bases = []
-        # Leave self.mro uninitialized until we compute it for real,
-        # so we don't accidentally try to use it prematurely.
+        self.mro = []
         self._fullname = defn.fullname
         self.is_abstract = False
         self.abstract_attributes = []
@@ -2165,6 +2246,7 @@ class TypeInfo(SymbolNode):
         self.inferring = []
         self.add_type_vars()
         self.metadata = {}
+        self.is_final = False
 
     def add_type_vars(self) -> None:
         if self.defn.type_vars:
@@ -2175,7 +2257,7 @@ class TypeInfo(SymbolNode):
         """Short name."""
         return self.defn.name
 
-    def fullname(self) -> str:
+    def fullname(self) -> Bogus[str]:
         return self._fullname
 
     def is_generic(self) -> bool:
@@ -2183,9 +2265,6 @@ class TypeInfo(SymbolNode):
         return len(self.type_vars) > 0
 
     def get(self, name: str) -> 'Optional[SymbolTableNode]':
-        if self.mro is None:  # Might be because of a previous error.
-            return None
-
         for cls in self.mro:
             n = cls.names.get(name)
             if n:
@@ -2220,12 +2299,16 @@ class TypeInfo(SymbolNode):
     def __repr__(self) -> str:
         return '<TypeInfo %s>' % self.fullname()
 
+    def __bool__(self) -> bool:
+        # We defined this here instead of just overriding it in
+        # FakeInfo so that mypyc can generate a direct call instead of
+        # using the generic bool handling.
+        return not isinstance(self, FakeInfo)
+
     def has_readable_member(self, name: str) -> bool:
         return self.get(name) is not None
 
     def get_method(self, name: str) -> Optional[FuncBase]:
-        if self.mro is None:  # Might be because of a previous error.
-            return None
         for cls in self.mro:
             if name in cls.names:
                 node = cls.names[name].node
@@ -2246,8 +2329,6 @@ class TypeInfo(SymbolNode):
                       if s.declared_metaclass is not None
                       and s.declared_metaclass.type is not None]
         for c in candidates:
-            if c.type.mro is None:
-                continue
             if all(other.type in c.type.mro for other in candidates):
                 return c
         return None
@@ -2261,10 +2342,9 @@ class TypeInfo(SymbolNode):
 
         This can be either via extension or via implementation.
         """
-        if self.mro:
-            for cls in self.mro:
-                if cls.fullname() == fullname:
-                    return True
+        for cls in self.mro:
+            if cls.fullname() == fullname:
+                return True
         return False
 
     def direct_base_classes(self) -> 'List[TypeInfo]':
@@ -2396,11 +2476,162 @@ class FakeInfo(TypeInfo):
     #    pass cleanly.
     # 2. If NOT_READY value is accidentally used somewhere, it will be obvious where the value
     #    is from, whereas a 'None' value could come from anywhere.
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
+    #
+    # Additionally, this serves as a more general-purpose placeholder
+    # for missing TypeInfos in a number of places where the excuses
+    # for not being Optional are a little weaker.
+    #
+    # TypeInfo defines a __bool__ method that returns False for FakeInfo
+    # so that it can be conveniently tested against in the same way that it
+    # would be if things were properly optional.
+    def __init__(self, msg: str) -> None:
+        self.msg = msg
 
     def __getattribute__(self, attr: str) -> None:
-        raise AssertionError('De-serialization failure: TypeInfo not fixed')
+        raise AssertionError(object.__getattribute__(self, 'msg'))
+
+
+VAR_NO_INFO = FakeInfo('Var is lacking info')  # type: Final[TypeInfo]
+CLASSDEF_NO_INFO = FakeInfo('ClassDef is lacking info')  # type: Final[TypeInfo]
+FUNC_NO_INFO = FakeInfo('FuncBase for non-methods lack info')  # type: Final[TypeInfo]
+
+
+class TypeAlias(SymbolNode):
+    """
+    A symbol node representing a type alias.
+
+    Type alias is a static concept, in contrast to variables with types
+    like Type[...]. Namely:
+        * type aliases
+            - can be used in type context (annotations)
+            - cannot be re-assigned
+        * variables with type Type[...]
+            - cannot be used in type context
+            - but can be re-assigned
+
+    An alias can be defined only by an assignment to a name (not any other lvalues).
+
+    Such assignment defines an alias by default. To define a variable,
+    an explicit Type[...] annotation is required. As an exception,
+    at non-global scope non-subscripted rvalue creates a variable even without
+    an annotation. This exception exists to accommodate the common use case of
+    class-valued attributes. See SemanticAnalyzerPass2.check_and_set_up_type_alias
+    for details.
+
+    Aliases can be generic. Currently, mypy uses unbound type variables for
+    generic aliases and identifies them by name. Essentially, type aliases
+    work as macros that expand textually. The definition and expansion rules are
+    following:
+
+        1. An alias targeting a generic class without explicit variables act as
+        the given class (this doesn't apply to Tuple and Callable, which are not proper
+        classes but special type constructors):
+
+            A = List
+            AA = List[Any]
+
+            x: A  # same as List[Any]
+            x: A[int]  # same as List[int]
+
+            x: AA  # same as List[Any]
+            x: AA[int]  # Error!
+
+            C = Callable  # Same as Callable[..., Any]
+            T = Tuple  # Same as Tuple[Any, ...]
+
+        2. An alias using explicit type variables in its rvalue expects
+        replacements (type arguments) for these variables. If missing, they
+        are treated as Any, like for other generics:
+
+            B = List[Tuple[T, T]]
+
+            x: B  # same as List[Tuple[Any, Any]]
+            x: B[int]  # same as List[Tuple[int, int]]
+
+            def f(x: B[T]) -> T: ...  # without T, Any would be used here
+
+        3. An alias can be defined using another aliases. In the definition
+        rvalue the Any substitution doesn't happen for top level unsubscripted
+        generic classes:
+
+            A = List
+            B = A  # here A is expanded to List, _not_ List[Any],
+                   # to match the Python runtime behaviour
+            x: B[int]  # same as List[int]
+            C = List[A]  # this expands to List[List[Any]]
+
+            AA = List[T]
+            D = AA  # here AA expands to List[Any]
+            x: D[int]  # Error!
+
+    Note: the fact that we support aliases like `A = List` means that the target
+    type will be initially an instance type with wrong number of type arguments.
+    Such instances are all fixed in the third pass of semantic analyzis.
+    We therefore store the difference between `List` and `List[Any]` rvalues (targets)
+    using the `no_args` flag. See also TypeAliasExpr.no_args.
+
+    Meaning of other fields:
+
+    target: The target type. For generic aliases contains unbound type variables
+        as nested types.
+    _fullname: Qualified name of this type alias. This is used in particular
+        to track fine grained dependencies from aliases.
+    alias_tvars: Names of unbound type variables used to define this alias.
+    normalized: Used to distinguish between `A = List`, and `A = list`. Both
+        are internally stored using `builtins.list` (because `typing.List` is
+        itself an alias), while the second cannot be subscripted because of
+        Python runtime limitation.
+    line and column: Line an column on the original alias definition.
+    """
+    __slots__ = ('target', '_fullname', 'alias_tvars', 'no_args', 'normalized', 'line', 'column')
+
+    def __init__(self, target: 'mypy.types.Type', fullname: str, line: int, column: int,
+                 *,
+                 alias_tvars: Optional[List[str]] = None,
+                 no_args: bool = False,
+                 normalized: bool = False) -> None:
+        self._fullname = fullname
+        self.target = target
+        if alias_tvars is None:
+            alias_tvars = []
+        self.alias_tvars = alias_tvars
+        self.no_args = no_args
+        self.normalized = normalized
+        super().__init__(line, column)
+
+    def name(self) -> str:
+        return self._fullname.split('.')[-1]
+
+    def fullname(self) -> str:
+        return self._fullname
+
+    def serialize(self) -> JsonDict:
+        data = {'.class': 'TypeAlias',
+                'fullname': self._fullname,
+                'target': self.target.serialize(),
+                'alias_tvars': self.alias_tvars,
+                'no_args': self.no_args,
+                'normalized': self.normalized,
+                'line': self.line,
+                'column': self.column
+                }  # type: JsonDict
+        return data
+
+    def accept(self, visitor: NodeVisitor[T]) -> T:
+        return visitor.visit_type_alias(self)
+
+    @classmethod
+    def deserialize(cls, data: JsonDict) -> 'TypeAlias':
+        assert data['.class'] == 'TypeAlias'
+        fullname = data['fullname']
+        alias_tvars = data['alias_tvars']
+        target = mypy.types.deserialize_type(data['target'])
+        no_args = data['no_args']
+        normalized = data['normalized']
+        line = data['line']
+        column = data['column']
+        return cls(target, fullname, line, column, alias_tvars=alias_tvars,
+                   no_args=no_args, normalized=normalized)
 
 
 class SymbolTableNode:
@@ -2428,11 +2659,7 @@ class SymbolTableNode:
     they should be correct.
 
     A few definitions get special kinds, including type variables (TVAR),
-    imported modules and module aliases (MODULE_REF), and type aliases
-    (TYPE_ALIAS).
-
-    Type aliases are very special and have additional attributes that
-    are only used for them ('type_override', 'alias_tvars' at least).
+    imported modules and module aliases (MODULE_REF)
 
     Attributes:
         kind: Kind of node. Possible values:
@@ -2441,17 +2668,11 @@ class SymbolTableNode:
                - MDEF: class member definition
                - TVAR: TypeVar(...) definition in any scope
                - MODULE_REF: reference to a module
-               - TYPE_ALIAS: type alias
                - UNBOUND_IMPORTED: temporary kind for imported names (we
                  don't know the final kind yet)
         node: AST node of definition (among others, this can be
             FuncDef/Var/TypeInfo/TypeVarExpr/MypyFile, or None for a bound
             type variable or a cross_ref that hasn't been fixed up yet).
-        type_override: If this not None, override the type of the 'node'
-            attribute. This is only used for type aliases.
-        alias_tvars: For generic aliases this stores the (qualified) names
-            of type variables. (For example see
-            testGenericAliasWithTypeVarsFromDifferentModules.)
         module_public: If False, this name won't be imported via
             'from <module> import *'. This has no effect on names within
             classes.
@@ -2459,14 +2680,9 @@ class SymbolTableNode:
             stub files)
         cross_ref: For deserialized MODULE_REF nodes, the referenced module
             name; for other nodes, optionally the name of the referenced object.
-        normalized: Used to distinguish between 'typing.List' and
-            'builtins.list'.  This is True when the former has been normalized
-            to the latter, and it allow us to reject 'list[str]' and similar.
         implicit: Was this defined by assignment to self attribute?
-        is_aliasing: Is this node refers to other node via node aliasing?
-            (This is currently used for simple aliases like `A = int` instead
-            of .type_override)
-        alias_name: TODO
+        plugin_generated: Was this symbol generated by a plugin?
+            (And therefore needs to be removed in aststrip.)
         no_serialize: Do not serialize this node if True. This is used to prevent
             keys in the cache that refer to modules on which this file does not
             depend. Currently this can happen if there is a module not in build
@@ -2479,47 +2695,37 @@ class SymbolTableNode:
             phase.
             TODO: Refactor build.py to make dependency tracking more transparent
             and/or refactor look-up functions to not require parent patching.
+
+    NOTE: No other attributes should be added to this class unless they
+    are shared by all node kinds.
     """
 
     __slots__ = ('kind',
                  'node',
-                 'type_override',
-                 'alias_tvars',
                  'module_public',
                  'module_hidden',
                  'cross_ref',
-                 'normalized',
                  'implicit',
-                 'is_aliasing',
-                 'alias_name',
+                 'plugin_generated',
                  'no_serialize',
                  )
-
-    # TODO: This is a mess. Refactor!
-    # TODO: Better describe how type aliases work.
 
     def __init__(self,
                  kind: int,
                  node: Optional[SymbolNode],
-                 typ: 'Optional[mypy.types.Type]' = None,
                  module_public: bool = True,
-                 normalized: bool = False,
-                 alias_tvars: Optional[List[str]] = None,
                  implicit: bool = False,
                  module_hidden: bool = False,
                  *,
+                 plugin_generated: bool = False,
                  no_serialize: bool = False) -> None:
         self.kind = kind
         self.node = node
-        self.type_override = typ
         self.module_public = module_public
-        self.normalized = normalized
-        self.alias_tvars = alias_tvars
         self.implicit = implicit
         self.module_hidden = module_hidden
         self.cross_ref = None  # type: Optional[str]
-        self.is_aliasing = False
-        self.alias_name = None  # type: Optional[str]
+        self.plugin_generated = plugin_generated
         self.no_serialize = no_serialize
 
     @property
@@ -2531,12 +2737,11 @@ class SymbolTableNode:
 
     @property
     def type(self) -> 'Optional[mypy.types.Type]':
-        # IDEA: Get rid of the Any type.
-        node = self.node  # type: Any
-        if self.type_override is not None:
-            return self.type_override
-        elif ((isinstance(node, Var) or isinstance(node, FuncDef))
-              and node.type is not None):
+        node = self.node
+        if (isinstance(node, Var) and node.type is not None):
+            return node.type
+        # mypy thinks this branch is unreachable but it is wrong (#3603)
+        elif (isinstance(node, FuncBase) and node.type is not None):
             return node.type
         elif isinstance(node, Decorator):
             return node.var.type
@@ -2546,10 +2751,7 @@ class SymbolTableNode:
     def copy(self) -> 'SymbolTableNode':
         new = SymbolTableNode(self.kind,
                               self.node,
-                              self.type_override,
                               self.module_public,
-                              self.normalized,
-                              self.alias_tvars,
                               self.implicit,
                               self.module_hidden)
         new.cross_ref = self.cross_ref
@@ -2578,10 +2780,10 @@ class SymbolTableNode:
             data['module_hidden'] = True
         if not self.module_public:
             data['module_public'] = False
-        if self.normalized:
-            data['normalized'] = True
         if self.implicit:
             data['implicit'] = True
+        if self.plugin_generated:
+            data['plugin_generated'] = True
         if self.kind == MODULE_REF:
             assert self.node is not None, "Missing module cross ref in %s for %s" % (prefix, name)
             data['cross_ref'] = self.node.fullname()
@@ -2594,9 +2796,6 @@ class SymbolTableNode:
                         data['cross_ref'] = fullname
                         return data
                 data['node'] = self.node.serialize()
-            if self.type_override is not None:
-                data['type_override'] = self.type_override.serialize()
-                data['alias_tvars'] = self.alias_tvars
         return data
 
     @classmethod
@@ -2611,20 +2810,15 @@ class SymbolTableNode:
             node = None
             if 'node' in data:
                 node = SymbolNode.deserialize(data['node'])
-            typ = None
-            if 'type_override' in data:
-                typ = mypy.types.deserialize_type(data['type_override'])
-            stnode = SymbolTableNode(kind, node, typ=typ)
-            if 'alias_tvars' in data:
-                stnode.alias_tvars = data['alias_tvars']
+            stnode = SymbolTableNode(kind, node)
         if 'module_hidden' in data:
             stnode.module_hidden = data['module_hidden']
         if 'module_public' in data:
             stnode.module_public = data['module_public']
-        if 'normalized' in data:
-            stnode.normalized = data['normalized']
         if 'implicit' in data:
             stnode.implicit = data['implicit']
+        if 'plugin_generated' in data:
+            stnode.plugin_generated = data['plugin_generated']
         return stnode
 
 
@@ -2699,8 +2893,9 @@ def get_member_expr_fullname(expr: MemberExpr) -> Optional[str]:
 deserialize_map = {
     key: obj.deserialize  # type: ignore
     for key, obj in globals().items()
-    if isinstance(obj, type) and issubclass(obj, SymbolNode) and obj is not SymbolNode
-}
+    if type(obj) is not FakeInfo
+    and isinstance(obj, type) and issubclass(obj, SymbolNode) and obj is not SymbolNode
+}  # type: Final
 
 
 def check_arg_kinds(arg_kinds: List[int], nodes: List[T], fail: Callable[[str, T], None]) -> None:

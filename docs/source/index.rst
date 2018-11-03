@@ -32,7 +32,6 @@ Mypy is a static type checker for Python 3 and Python 2.7.
    kinds_of_types
    class_basics
    protocols
-   metaclasses
    python2
    dynamic_typing
    casts
@@ -40,15 +39,19 @@ Mypy is a static type checker for Python 3 and Python 2.7.
    stubs
    generics
    more_types
+   final_attrs
+   metaclasses
 
 .. toctree::
    :maxdepth: 2
    :caption: Configuring and running mypy
 
+   running_mypy
    command_line
    config_file
    mypy_daemon
    installed_packages
+   extending_mypy
 
 .. toctree::
    :maxdepth: 2

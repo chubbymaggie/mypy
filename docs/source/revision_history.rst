@@ -4,6 +4,39 @@ Revision history
 List of major changes (the `Mypy Blog <http://mypy-lang.blogspot.com/>`_ contains more
 detailed release notes):
 
+- October 2018
+    * Publish ``mypy`` version 0.640 on PyPI.
+
+      * Document final qualifiers.
+
+      * Document ``--namespace-packages``.
+
+      * Remove deprecated options, and mark ``--quick-and-dirty`` as deprecated.
+
+      * Document ``--permissive-toplevel``.
+
+      * Reorganize config file docs.
+
+- September 2018
+    * Publish ``mypy`` version 0.630 on PyPI.
+
+      * Document ``--warn-incomplete-stub`` (:ref:`docs <warn-incomplete-stub>`).
+
+      * Document incompatibility of stub-only packages and ``MYPYPATH``
+        (:ref:`docs <installed-packages>`).
+
+      * Reorganize command line :ref:`documentation <command-line>`
+        (see also :ref:`docs <running-mypy>` and :ref:`more docs <extending-mypy>`).
+
+      * Document :ref:`callback protocols <callback_protocols>`.
+
+- July 2018
+    * Publish ``mypy`` version 0.620 on PyPI.
+
+      * Improve support for :ref:`overloads <function-overloading>`.
+
+      * Add support for :ref:`dataclasses <dataclasses_support>`.
+
 - June 2018
     * Publish ``mypy`` version 0.610 on PyPI.
 
@@ -75,7 +108,7 @@ detailed release notes):
         of the analysis (i.e. the ``--python-version`` flag).
 
       * Split ``--disallow-any`` flag into
-        :ref:`separate boolean flags <disallow-any>`.
+        :ref:`separate boolean flags <disallow-dynamic-typing>`.
 
       * The ``--old-html-report`` flag was removed.
 
@@ -100,7 +133,7 @@ detailed release notes):
 
     * Publish ``mypy`` version 0.520 on PyPI.
 
-    * Add :ref:`fine-grained control of Any types <disallow-any>`.
+    * Add :ref:`fine-grained control of Any types <disallow-dynamic-typing>`.
 
     * Add :ref:`typeddict`.
 

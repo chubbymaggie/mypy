@@ -36,7 +36,7 @@
 -- incremental runs is not yet supported.
 --
 -- Each test case run without caching and with caching (if the initial run passes),
--- unless it has one a --skip-cache or --skip-nocache suffix. We sometimes
+-- unless it has one a -only_when_cache or -only_when_nocache arguments. We sometimes
 -- skip caching test cases to speed up tests, if the caching variant is not useful.
 -- The caching test case variants get an implicit _cached suffix.
 
@@ -313,7 +313,7 @@ main:5: error: Module has no attribute "B"
 ==
 main:5: error: Module has no attribute "B"
 
-[case testContinueToReportErrorAtTopLevel-skip-cache]
+[case testContinueToReportErrorAtTopLevel-only_when_nocache]
 -- Different cache/no-cache tests because:
 -- Error message ordering differs
 import n
@@ -338,7 +338,7 @@ n.py:2: error: "A" has no attribute "g"
 ==
 n.py:2: error: "A" has no attribute "g"
 
-[case testContinueToReportErrorAtTopLevel-skip-nocache]
+[case testContinueToReportErrorAtTopLevel-only_when_cache]
 -- Different cache/no-cache tests because:
 -- Error message ordering differs
 import n
@@ -628,6 +628,378 @@ class M(type):
 [out]
 ==
 a.py:4: error: Incompatible types in assignment (expression has type "str", variable has type "int")
+
+[case testDataclassUpdate1]
+# flags: --python-version 3.7
+[file a.py]
+from dataclasses import dataclass
+
+@dataclass
+class A:
+    x: int
+
+[file b.py]
+from dataclasses import dataclass
+
+from a import A
+@dataclass
+class B(A):
+    y: int
+
+B(1, 2)
+
+[file a.py.2]
+from dataclasses import dataclass
+
+@dataclass
+class A:
+    x: str
+
+[file a.py.3]
+from dataclasses import dataclass
+
+@dataclass
+class A:
+    x: int
+
+[out]
+==
+b.py:8: error: Argument 1 to "B" has incompatible type "int"; expected "str"
+==
+[builtins fixtures/list.pyi]
+
+[case testDataclassUpdate2]
+# flags: --python-version 3.7
+[file c.py]
+Foo = int
+
+[file c.py.2]
+Foo = str
+
+[file a.py]
+from dataclasses import dataclass
+from c import Foo
+
+@dataclass
+class A:
+    x: Foo
+
+[file b.py]
+from dataclasses import dataclass
+
+from a import A
+@dataclass
+class B(A):
+    y: int
+
+B(1, 2)
+
+[out]
+==
+b.py:8: error: Argument 1 to "B" has incompatible type "int"; expected "str"
+[builtins fixtures/list.pyi]
+
+[case testDataclassUpdate3]
+# flags: --python-version 3.7
+from b import B
+B(1, 2)
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass
+class A:
+    a: int
+    other: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Too few arguments for "B"
+
+[case testDataclassUpdate4]
+# flags: --python-version 3.7
+from b import B
+B(1, 2)
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass(frozen=True)
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass(frozen=True)
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass(frozen=True)
+class A:
+    a: int
+    other: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Too few arguments for "B"
+
+[case testDataclassUpdate5]
+# flags: --python-version 3.7
+from b import B
+B(1, 2)
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+    other: int
+
+[file a.py.3]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Too few arguments for "B"
+==
+
+[case testDataclassUpdate6]
+# flags: --python-version 3.7
+from b import B
+B(1, 2) < B(1, 2)
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass(order=True)
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass
+class A:
+    a: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Unsupported left operand type for < ("B")
+
+[case testDataclassUpdate8]
+# flags: --python-version 3.7
+from c import C
+C(1, 2, 3)
+[file c.py]
+from b import B
+from dataclasses import dataclass
+@dataclass
+class C(B):
+    c: int
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass
+class A:
+    a: int
+    other: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Too few arguments for "C"
+
+[case testDataclassUpdate9]
+# flags: --python-version 3.7
+from c import C
+C(1, 2, 3)
+[file c.py]
+from b import B
+from dataclasses import dataclass
+@dataclass
+class C(B):
+    c: int
+[file b.py]
+from a import A
+from dataclasses import dataclass
+@dataclass
+class B(A):
+    b: int
+[file a.py]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+
+[file a.py.2]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+    other: int
+
+[file a.py.3]
+from dataclasses import dataclass
+@dataclass(init=False)
+class A:
+    a: int
+
+[builtins fixtures/list.pyi]
+[out]
+==
+main:3: error: Too few arguments for "C"
+==
+
+[case testAttrsUpdate1]
+[file a.py]
+import attr
+@attr.s
+class A:
+    a = attr.ib()   # type: int
+
+[file b.py]
+from a import A
+import attr
+@attr.s
+class B(A):
+    b = attr.ib()   # type: int
+
+B(1, 2)
+
+[file a.py.2]
+import attr
+@attr.s
+class A:
+    a = attr.ib()   # type: int
+    other = attr.ib()   # type: int
+[builtins fixtures/list.pyi]
+[out]
+==
+b.py:7: error: Too few arguments for "B"
+
+[case testAttrsUpdate2]
+from b import B
+B(1, 2)
+[file b.py]
+from a import A
+import attr
+@attr.s
+class B(A):
+    b = attr.ib()   # type: int
+[file a.py]
+import attr
+@attr.s(init=False)
+class A:
+    a = attr.ib()   # type: int
+
+[file a.py.2]
+import attr
+@attr.s(init=False)
+class A:
+    a = attr.ib()   # type: int
+    other = attr.ib()   # type: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:2: error: Too few arguments for "B"
+
+[case testAttrsUpdate3]
+from b import B
+B(1, 2)
+[file b.py]
+from a import A
+import attr
+@attr.s(auto_attribs=True)
+class B(A):
+    x: int
+[file a.py]
+import attr
+@attr.s(auto_attribs=True, init=False)
+class A:
+    a: int
+
+[file a.py.2]
+import attr
+@attr.s(auto_attribs=True, init=False)
+class A:
+    a: int
+    other: int
+[builtins fixtures/list.pyi]
+
+[file a.py.3]
+import attr
+@attr.s(auto_attribs=True, init=False)
+class A:
+    a: int
+[builtins fixtures/list.pyi]
+
+[out]
+==
+main:2: error: Too few arguments for "B"
+==
+
+[case testAttrsUpdate4]
+from b import B
+B(1, 2) < B(1, 2)
+[file b.py]
+from a import A
+import attr
+@attr.s(cmp=False)
+class B(A):
+    b = attr.ib()   # type: int
+[file a.py]
+import attr
+@attr.s(init=False)
+class A:
+    a = attr.ib()   # type: int
+
+[file a.py.2]
+import attr
+@attr.s(cmp=False, init=False)
+class A:
+    a = attr.ib()   # type: int
+[builtins fixtures/list.pyi]
+[out]
+==
+main:2: error: Unsupported left operand type for < ("B")
 
 [case testAddBaseClassMethodCausingInvalidOverride]
 import m
@@ -1229,6 +1601,32 @@ def f() -> None: pass
 [out]
 ==
 main:2: error: Module 'a' has no attribute 'f'
+
+[case testRefreshTyping]
+from typing import Sized
+from c import A
+import z
+
+# Force typing to get refreshed by using a protocol from it
+x: Sized = A()
+
+[file c.py]
+class D:
+    def __len__(self) -> int: return 0
+A = D
+[file c.py.2]
+class C:
+    def __len__(self) -> int: return 0
+A = C
+[file z.py]
+from typing import List
+T = List[int]
+[file z.py.2]
+from typing import List
+T = List[int]  # yo
+[builtins fixtures/list.pyi]
+[out]
+==
 
 [case testNamedTupleRefresh]
 from typing import NamedTuple
@@ -2086,6 +2484,36 @@ main:2: error: Cannot find module named 'm'
 main:2: note: (Perhaps setting MYPYPATH or using the "--ignore-missing-imports" flag would help)
 main:12: error: Overloaded function signature 2 will never be matched: signature 1's parameter type(s) are the same or broader
 main:14: error: Cannot find module named 'n'
+
+[case testOverloadClassmethodDisappears]
+from typing import overload
+from m import Wrapper
+reveal_type(Wrapper.foo(3))
+[file m.pyi]
+from typing import overload
+class Wrapper:
+    @overload
+    @classmethod
+    def foo(self, x: int) -> int: ...
+    @overload
+    @classmethod
+    def foo(self, x: str) -> str: ...
+[file m.pyi.2]
+from typing import overload
+class Wrapper:
+    @overload
+    def foo(cls, x: int) -> int: ...
+    @overload
+    def foo(cls, x: str) -> str: ...
+[builtins fixtures/classmethod.pyi]
+[out]
+main:3: error: Revealed type is 'builtins.int'
+==
+main:3: error: Revealed type is 'Any'
+main:3: error: No overload variant of "foo" of "Wrapper" matches argument type "int"
+main:3: note: Possible overload variants:
+main:3: note:     def foo(cls: Wrapper, x: int) -> int
+main:3: note:     def foo(cls: Wrapper, x: str) -> str
 
 [case testRefreshGenericClass]
 from typing import TypeVar, Generic
@@ -3511,7 +3939,7 @@ from b import B
 B(int())
 [out]
 ==
-c.py:2: error: Argument 1 has incompatible type "int"; expected "str"
+c.py:2: error: Argument 1 to "A" has incompatible type "int"; expected "str"
 
 [case testAliasFineInitGenericFunc]
 import c
@@ -3537,7 +3965,7 @@ from b import B
 def f() -> None:
     B(str())
 [out]
-c.py:3: error: Argument 1 has incompatible type "str"; expected "int"
+c.py:3: error: Argument 1 to "A" has incompatible type "str"; expected "int"
 ==
 
 [case testAliasFineInitChainedMod]
@@ -4500,7 +4928,7 @@ def g(x: T) -> T:
 ==
 a.py:2: error: Value of type variable "T" of function cannot be "int"
 
-[case testGenericFineCallableBoundDeleted-skip-nocache]
+[case testGenericFineCallableBoundDeleted-only_when_cache]
 # See https://github.com/python/mypy/issues/4783
 import a
 [file a.py]
@@ -4858,11 +5286,12 @@ import T
 ==
 ==
 main:3: error: "C" expects no type arguments, but 1 given
+main:3: error: Invalid type "T"
 main:5: error: Free type variable expected in Generic[...]
 main:6: error: Invalid type "T"
+main:9: error: Invalid type "T"
 main:9: error: Bad number of arguments for type alias, expected: 0, given: 1
 main:9: error: "C" expects no type arguments, but 1 given
-main:9: error: Invalid type "T"
 
 [case testChangeClassToModule]
 import a
@@ -5896,7 +6325,7 @@ class C:
 ==
 a.py:4: error: Argument 1 to "func" has incompatible type "B"; expected "P"
 
-[case testTwoProtocolsTwoFilesCrossedUpdateType-skip-cache]
+[case testTwoProtocolsTwoFilesCrossedUpdateType-only_when_nocache]
 # this test and the next one (TwoProtocolsTwoFilesCrossedDeleteAttr) has errors ordered
 # opposite way with and without cache, therefore skip one of each.
 import a
@@ -5934,7 +6363,7 @@ b2.py:7: error: Argument 1 to "f" has incompatible type "D"; expected "P1"
 b2.py:7: note: Following member(s) of "D" have conflicts:
 b2.py:7: note:     x: expected "int", got "str"
 
-[case testTwoProtocolsTwoFilesCrossedDeleteAttr-skip-nocache]
+[case testTwoProtocolsTwoFilesCrossedDeleteAttr-only_when_cache]
 import a
 [file a.py]
 import b1
@@ -6306,6 +6735,9 @@ def f(x):
 [out]
 ==
 main:3: error: No overload variant of "f" matches argument type "str"
+main:3: note: Possible overload variants:
+main:3: note:     def f(x: int) -> None
+main:3: note:     def f(x: C) -> int
 
 [case testOverloadsDeleted]
 import mod
@@ -6415,6 +6847,9 @@ T = TypeVar('T', bound=str)
 [out]
 ==
 a.py:2: error: No overload variant of "f" matches argument type "int"
+a.py:2: note: Possible overload variants:
+a.py:2: note:     def f(x: C) -> None
+a.py:2: note:     def [c.T <: str] f(x: c.T) -> c.T
 
 [case testOverloadsGenericToNonGeneric]
 import a
@@ -6440,6 +6875,9 @@ class T: pass
 [out]
 ==
 a.py:2: error: No overload variant of "f" matches argument type "int"
+a.py:2: note: Possible overload variants:
+a.py:2: note:     def f(x: C) -> None
+a.py:2: note:     def f(x: T) -> T
 
 [case testOverloadsToNonOverloaded]
 import a
@@ -6595,6 +7033,9 @@ class C:
 [out]
 ==
 a.py:2: error: No overload variant of "B" matches argument type "int"
+a.py:2: note: Possible overload variant:
+a.py:2: note:     def __init__(self, x: str) -> B
+a.py:2: note:     <1 more non-matching overload not shown>
 
 [case testOverloadedToNormalMethodMetaclass]
 import a
@@ -6663,7 +7104,7 @@ def g(x: str) -> str: pass
 ==
 main:2: error: Argument 1 to "g" has incompatible type "int"; expected "str"
 
-[case testExtendedUnpacking-skip-cache]
+[case testExtendedUnpacking-only_when_nocache]
 from typing import List
 from a import g
 def f() -> List[int]:
@@ -6683,7 +7124,7 @@ def g() -> Tuple[str, str]: pass
 ==
 main:5: error: Incompatible return value type (got "List[str]", expected "List[int]")
 
-[case testUnpackInExpression1-skip-cache]
+[case testUnpackInExpression1-only_when_nocache]
 from typing import Tuple, List
 from a import t
 
@@ -6707,7 +7148,7 @@ def t() -> Tuple[str]: ...
 main:5: error: Incompatible return value type (got "Tuple[int, str]", expected "Tuple[int, int]")
 main:8: error: List item 1 has incompatible type "Tuple[str]"; expected "int"
 
-[case testUnpackInExpression2-skip-cache]
+[case testUnpackInExpression2-only_when_nocache]
 from typing import Set
 from a import t
 
@@ -6727,7 +7168,7 @@ def t() -> Tuple[str]: pass
 ==
 main:5: error: Argument 2 to <set> has incompatible type "*Tuple[str]"; expected "int"
 
-[case testUnpackInExpression3-skip-cache]
+[case testUnpackInExpression3-only_when_nocache]
 from typing import Dict
 from a import d
 
@@ -6747,7 +7188,7 @@ def d() -> Dict[int, int]: pass
 ==
 main:5: error: Argument 1 to "update" of "dict" has incompatible type "Dict[int, int]"; expected "Mapping[int, str]"
 
-[case testAwaitAndAsyncDef-skip-cache]
+[case testAwaitAndAsyncDef-only_when_nocache]
 from a import g
 
 async def f() -> int:
@@ -6767,7 +7208,7 @@ async def g() -> str:
 ==
 main:4: error: Incompatible return value type (got "str", expected "int")
 
-[case testAwaitAnd__await__-skip-cache]
+[case testAwaitAnd__await__-only_when_nocache]
 from a import C
 
 async def f(c: C) -> int:
@@ -6830,7 +7271,7 @@ main:6: error: Incompatible return value type (got "str", expected "int")
 ==
 main:6: error: Incompatible return value type (got "object", expected "int")
 
-[case testAsyncWith2-skip-cache]
+[case testAsyncWith2-only_when_nocache]
 from a import C
 
 async def f() -> int:
@@ -6936,7 +7377,7 @@ main:7: error: Unsupported operand types for + ("str" and "int")
 ==
 main:5: error: Return type of "m" incompatible with supertype "B"
 
-[case testLiskovFineVariableClean-skip-cache]
+[case testLiskovFineVariableClean-only_when_nocache]
 import b
 class A(b.B):
     x: str
@@ -6950,7 +7391,7 @@ class B:
 ==
 main:3: error: Incompatible types in assignment (expression has type "str", base class "B" defined the type as "int")
 
-[case testLiskovFineVariableCleanDefInMethod-skip-cache]
+[case testLiskovFineVariableCleanDefInMethod-only_when_nocache]
 import b
 class A(b.B):
     def meth(self) -> None:
@@ -6965,7 +7406,7 @@ class B:
 ==
 main:4: error: Incompatible types in assignment (expression has type "str", base class "B" defined the type as "int")
 
-[case testLiskovFineVariableCleanDefInMethodNested-skip-cache]
+[case testLiskovFineVariableCleanDefInMethodNested-only_when_nocache]
 from b import B
 def outer() -> None:
     class A(B):
@@ -6981,7 +7422,7 @@ class B:
 ==
 main:5: error: Incompatible types in assignment (expression has type "str", base class "B" defined the type as "int")
 
-[case testLiskovFineVariableInFunctionClean-skip-cache]
+[case testLiskovFineVariableInFunctionClean-only_when_nocache]
 from b import B
 def outer() -> None:
     class A(B):
@@ -6996,7 +7437,7 @@ class B:
 ==
 main:4: error: Incompatible types in assignment (expression has type "str", base class "B" defined the type as "int")
 
-[case testLiskovFineDecoratorClean-skip-cache]
+[case testLiskovFineDecoratorClean-only_when_nocache]
 import b
 from c import deco
 class A(b.B):
@@ -7173,7 +7614,6 @@ def fu() -> int:
 [out]
 ==
 
-
 [case testRefreshOptions]
 [file mypy.ini]
 [[mypy]
@@ -7191,3 +7631,503 @@ x = []  # type: List
 [builtins fixtures/list.pyi]
 [out]
 ==
+
+[case testNamedTupleFallbackModule]
+import b
+[file b.py]
+from a import A
+def f(a: A):
+    pass
+[file b.py.2]
+from a import A
+def f(a: A):
+    reveal_type(a)
+[file a.py]
+from typing import NamedTuple
+
+F = [('x', int)]
+A = NamedTuple('A', F)  # type: ignore
+[builtins fixtures/list.pyi]
+[out]
+==
+b.py:3: error: Revealed type is 'Tuple[, fallback=a.A]'
+
+[case testImportOnTopOfAlias1]
+from a import A
+x: A
+[file a.py]
+from typing import TypeVar, List
+T = TypeVar('T')
+A = List[T]
+[file a.py.2]
+from typing import TypeVar, List
+T = TypeVar('T')
+A = List[T]
+from b import A
+[file b.py]
+# empty
+[builtins fixtures/list.pyi]
+[out]
+==
+a.py:4: error: Module 'b' has no attribute 'A'
+a.py:4: error: Name 'A' already defined on line 3
+
+-- the order of errors is different with cache
+[case testImportOnTopOfAlias2]
+from a import A
+x: A
+[file a.py]
+from typing import TypeVar, List
+T = TypeVar('T')
+A = List[T]
+[file a.py.2]
+from typing import TypeVar, List
+T = TypeVar('T')
+A = List[T]
+from b import A as A
+[file b.py]
+def A(x: str) -> str: pass
+[builtins fixtures/list.pyi]
+[out]
+==
+a.py:4: error: Incompatible import of "A" (imported name has type "Callable[[str], str]", local name has type "Type[List[Any]]")
+
+[case testFakeOverloadCrash]
+import b
+[file a.py]
+def dec(fun):
+    pass
+a = 1
+[file a.py.2]
+def dec(fun):
+    pass
+a = 2
+[file b.py]
+from a import dec
+@dec
+def a():
+    pass
+@dec
+def a():
+    pass
+[out]
+b.py:5: error: Name 'a' already defined on line 2
+==
+b.py:5: error: Name 'a' already defined on line 2
+
+[case testFakeOverloadCrash2]
+# this test just should not crash
+import a
+[file a.py]
+T = TypeVar("T")
+
+def foo(func):
+    return func
+
+@foo
+def bar(x: T) -> T:
+    pass
+
+@foo
+def bar(x: T) -> T:
+    pass
+[file a.py.2]
+T = TypeVar("T")
+
+def foo(func):
+    return func
+
+@foo
+def bar(x: T) -> T:
+    pass
+
+@foo
+def bar(x: T) -> T:
+    pass
+x = 1
+[out]
+a.py:1: error: Name 'TypeVar' is not defined
+a.py:10: error: Name 'bar' already defined on line 6
+a.py:11: error: Invalid type "a.T"
+==
+a.py:1: error: Name 'TypeVar' is not defined
+a.py:10: error: Name 'bar' already defined on line 6
+a.py:11: error: Invalid type "a.T"
+
+[case testRefreshForWithTypeComment1]
+[file a.py]
+from typing import List
+import b
+def foo(l: List[int]) -> None:
+    for x in l:  # type: object
+        pass
+    x = object()
+    b.x
+[file b.py]
+x = 1
+[file b.py.2]
+x = '1'
+[builtins fixtures/list.pyi]
+[out]
+==
+
+[case testRefreshForWithTypeComment2]
+from typing import List, Any
+import m
+def f(x: List[Any]) -> None:
+    for a in x:  # type: m.A
+        pass
+[file m.py]
+class A: pass
+[file m.py.2]
+[builtins fixtures/list.pyi]
+[out]
+==
+main:4: error: Name 'm.A' is not defined
+
+[case testIdLikeDecoForwardCrash]
+import b
+[file b.py]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F_BadName', bound=Callable[..., Any])  # type: ignore
+def deco(func: F) -> F:  # type: ignore
+    pass
+
+@deco
+def test(x: int, y: int) -> str:
+    pass
+[file b.py.2]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F_BadName', bound=Callable[..., Any])  # type: ignore
+def deco(func: F) -> F:  # type: ignore
+    pass
+
+@deco
+def test(x: int, y: int) -> str:
+    pass
+x = 1
+[out]
+==
+
+[case testIdLikeDecoForwardCrashAlias]
+import b
+[file b.py]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F', bound=Func)
+def deco(func: F) -> F:
+    pass
+
+@deco
+def test(x: int, y: int) -> str:
+    pass
+Func = Callable[..., Any]
+[file b.py.2]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F', bound=Func)
+def deco(func: F) -> F:
+    pass
+
+@deco
+def test(x: int, y: int) -> str:
+    pass
+x = 1
+Func = Callable[..., Any]
+[out]
+==
+
+[case testIdLikeDecoForwardCrash_python2]
+# flags: --py2
+import b
+[file b.py]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F_BadName', bound=Callable[..., Any])  # type: ignore
+def deco(func):  # type: ignore
+    # type: (F) -> F
+    pass
+
+@deco
+def test(x, y):
+    # type: (int, int) -> str
+    pass
+[file b.py.2]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F_BadName', bound=Callable[..., Any])  # type: ignore
+def deco(func):  # type: ignore
+    # type: (F) -> F
+    pass
+
+@deco
+def test(x, y):
+    # type: (int, int) -> str
+    pass
+x = 1
+[out]
+==
+
+[case testIdLikeDecoForwardCrashAlias_python2]
+# flags: --py2
+import b
+[file b.py]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F', bound=Func)
+def deco(func):
+    # type: (F) -> F
+    pass
+
+@deco
+def test(x, y):
+    # type: (int, int) -> str
+    pass
+Func = Callable[..., Any]
+[file b.py.2]
+from typing import Callable, Any, TypeVar
+
+F = TypeVar('F', bound=Func)
+def deco(func):
+    # type: (F) -> F
+    pass
+
+@deco
+def test(x, y):
+    # type: (int, int) -> str
+    pass
+x = 1
+Func = Callable[..., Any]
+[out]
+==
+
+-- Test cases for final qualifier
+
+[case testFinalAddFinalVarAssignFine]
+import mod
+from a import D
+from mod import x
+
+x = 2
+def outer() -> None:
+    mod.x = 2
+    x = 2  # This is OK because it creates a local variable
+    d: D
+    d.y = 2
+    d.z = 2
+    D.y = 2
+[file a.py]
+import mod
+
+class D(mod.C):
+    pass
+[file mod.py]
+x = 1
+class C:
+    y = 1
+    def __init__(self) -> None:
+        self.z = 1
+
+[file mod.py.2]
+from typing import Final
+
+x: Final = 1
+class C:
+    y: Final = 1
+    def __init__(self) -> None:
+        self.z: Final = 1
+[out]
+==
+main:5: error: Cannot assign to final name "x"
+main:7: error: Cannot assign to final name "x"
+main:10: error: Cannot assign to final attribute "y"
+main:11: error: Cannot assign to final attribute "z"
+main:12: error: Cannot assign to final attribute "y"
+
+[case testFinalAddFinalVarOverrideFine]
+from mod import C
+
+class D(C):
+    x = 2
+    def __init__(self) -> None:
+        self.y = 2
+class E(C):
+    y = 2
+    def __init__(self) -> None:
+        self.x = 2
+
+[file mod.py]
+class C:
+    x = 1
+    def __init__(self) -> None:
+        self.y = 1
+
+[file mod.py.2]
+from typing import Final
+
+class C:
+    x: Final = 1
+    def __init__(self) -> None:
+        self.y: Final = 1
+[out]
+==
+main:4: error: Cannot assign to final name "x"
+main:6: error: Cannot assign to final attribute "y"
+main:8: error: Cannot assign to final name "y"
+main:10: error: Cannot assign to final attribute "x"
+
+[case testFinalAddFinalMethodOverrideFine]
+from mod import C
+
+class D(C):
+    def meth(self) -> int: ...
+
+[file mod.py]
+class C:
+    def meth(self) -> int: ...
+
+[file mod.py.2]
+from typing import final
+
+class C:
+    @final
+    def meth(self) -> int: ...
+[out]
+==
+main:4: error: Cannot override final attribute "meth" (previously declared in base class "C")
+
+[case testFinalAddFinalMethodOverrideWithVarFine]
+from mod import C
+from typing import Any
+
+class D(C):
+    meth: Any = 2
+    def __init__(self) -> None:
+        self.other: Any = 2
+
+[file mod.py]
+class C:
+    def meth(self) -> int: ...
+    def other(self) -> int: ...
+
+[file mod.py.2]
+from typing import final
+
+class C:
+    @final
+    def meth(self) -> int: ...
+    @final
+    def other(self) -> int: ...
+[out]
+==
+main:5: error: Cannot override final attribute "meth" (previously declared in base class "C")
+main:7: error: Cannot assign to final attribute "other"
+main:7: error: Cannot override final attribute "other" (previously declared in base class "C")
+
+[case testFinalAddFinalMethodOverrideOverloadFine]
+from typing import overload
+from mod import C
+
+def outer() -> None:
+    class D(C):
+        @overload
+        def meth(self, x: int) -> int: ...
+        @overload
+        def meth(self, x: str) -> str: ...
+        def meth(self, x):
+            pass
+
+[file mod.pyi]
+from typing import overload
+class C:
+    @overload
+    def meth(self, x: int) -> int: ...
+    @overload
+    def meth(self, x: str) -> str: ...
+
+[file mod.pyi.2]
+from typing import final, overload
+
+class C:
+    @final
+    @overload
+    def meth(self, x: int) -> int: ...
+    @overload
+    def meth(self, x: str) -> str: ...
+[out]
+==
+main:6: error: Cannot override final attribute "meth" (previously declared in base class "C")
+
+[case testFinalAddFinalPropertyWithVarFine]
+from mod import C
+
+def outer() -> None:
+    class D(C):
+        p = 2
+    class E(C):
+        def __init__(self) -> None:
+            self.p: int = 2
+
+[file mod.py]
+class C:
+    @property
+    def p(self) -> int:
+        pass
+
+[file mod.py.2]
+from typing import final
+
+class C:
+    @final
+    @property
+    def p(self) -> int:
+        pass
+[builtins fixtures/property.pyi]
+[out]
+==
+main:5: error: Cannot override final attribute "p" (previously declared in base class "C")
+main:8: error: Cannot assign to final attribute "p"
+main:8: error: Cannot override final attribute "p" (previously declared in base class "C")
+
+[case testIfMypyUnreachableClass]
+from a import x
+
+MYPY = False
+if MYPY:
+    pass
+else:
+    class A:
+        pass
+y: int = x
+[file a.py]
+x = 1
+[file a.py.2]
+x = 2
+[builtins fixtures/bool.pyi]
+[out]
+==
+
+[case testIfTypeCheckingUnreachableClass]
+from a import x
+from typing import TYPE_CHECKING
+
+if not TYPE_CHECKING:
+    class A(int):
+        pass
+else:
+    A = int
+
+y: A = x
+[file a.py]
+x = 1
+[file a.py.2]
+x = 2
+[file a.py.3]
+x = 'no way'
+[builtins fixtures/bool.pyi]
+[out]
+==
+==
+main:10: error: Incompatible types in assignment (expression has type "str", variable has type "int")

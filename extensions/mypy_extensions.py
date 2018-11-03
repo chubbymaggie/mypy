@@ -135,3 +135,25 @@ def KwArg(type=Any):
 
 # Return type that indicates a function does not return
 class NoReturn: pass
+
+
+def trait(cls):
+    return cls
+
+
+# TODO: We may want to try to properly apply this to any type
+# variables left over...
+class _FlexibleAliasClsApplied:
+    def __init__(self, val):
+        self.val = val
+
+    def __getitem__(self, args):
+        return self.val
+
+
+class _FlexibleAliasCls:
+    def __getitem__(self, args):
+        return _FlexibleAliasClsApplied(args[-1])
+
+
+FlexibleAlias = _FlexibleAliasCls()

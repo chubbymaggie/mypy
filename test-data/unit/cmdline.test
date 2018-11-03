@@ -486,9 +486,9 @@ import a.b
 [file a.b.py]
 whatever
 [out]
-main.py:1: error: Cannot find module named 'a'
-main.py:1: note: (Perhaps setting MYPYPATH or using the "--ignore-missing-imports" flag would help)
 main.py:1: error: Cannot find module named 'a.b'
+main.py:1: note: (Perhaps setting MYPYPATH or using the "--ignore-missing-imports" flag would help)
+main.py:1: error: Cannot find module named 'a'
 
 [case testPythonVersionTooOld10]
 # cmd: mypy -c pass
@@ -508,13 +508,13 @@ python_version = 2.6
 mypy.ini: [mypy]: python_version: Python 2.6 is not supported (must be 2.7)
 == Return code: 0
 
-[case testPythonVersionTooOld32]
+[case testPythonVersionTooOld33]
 # cmd: mypy -c pass
 [file mypy.ini]
 [[mypy]
-python_version = 3.2
+python_version = 3.3
 [out]
-mypy.ini: [mypy]: python_version: Python 3.2 is not supported (must be 3.3 or higher)
+mypy.ini: [mypy]: python_version: Python 3.3 is not supported (must be 3.4 or higher)
 == Return code: 0
 
 [case testPythonVersionTooNew28]
@@ -542,11 +542,11 @@ mypy.ini: [mypy]: python_version: Python major version '4' out of range (must be
 python_version = 2.7
 [out]
 
-[case testPythonVersionAccepted33]
+[case testPythonVersionAccepted34]
 # cmd: mypy -c pass
 [file mypy.ini]
 [[mypy]
-python_version = 3.3
+python_version = 3.4
 [out]
 
 [case testPythonVersionAccepted36]
@@ -1182,7 +1182,7 @@ warn_unused_configs = True
 [[mypy-emarg.hatch]
 -- Currently we don't treat an unstructured pattern like a.*.b as unused
 -- if it matches another section (like a.x.b). This would be reasonable
--- to change.
+-- to change. '
 [[mypy-a.*.b]
 [[mypy-a.*.c]
 [[mypy-a.x.b]
@@ -1257,6 +1257,6 @@ import d
 [case testCacheMap]
 -- This just checks that a valid --cache-map triple is accepted.
 -- (Errors are too verbose to check.)
-# cmd: mypy a.py --cache-map a.py a.meta.json a.data.json 
+# cmd: mypy a.py --cache-map a.py a.meta.json a.data.json
 [file a.py]
 [out]

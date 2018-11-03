@@ -61,7 +61,6 @@ class TransformVisitor(NodeVisitor[Node]):
         # NOTE: The 'names' and 'imports' instance variables will be empty!
         new = MypyFile(self.statements(node.defs), [], node.is_bom,
                        ignored_lines=set(node.ignored_lines))
-        new._name = node._name
         new._fullname = node._fullname
         new.path = node.path
         new.names = SymbolTable()
@@ -106,7 +105,7 @@ class TransformVisitor(NodeVisitor[Node]):
         new = FuncDef(node.name(),
                       [self.copy_argument(arg) for arg in node.arguments],
                       self.block(node.body),
-                      cast(FunctionLike, self.optional_type(node.type)))
+                      cast(Optional[FunctionLike], self.optional_type(node.type)))
 
         self.copy_function_attributes(new, node)
 
@@ -117,6 +116,7 @@ class TransformVisitor(NodeVisitor[Node]):
         new.is_static = node.is_static
         new.is_class = node.is_class
         new.is_property = node.is_property
+        new.is_final = node.is_final
         new.original_def = node.original_def
 
         if node in self.func_placeholder_map:
@@ -132,8 +132,8 @@ class TransformVisitor(NodeVisitor[Node]):
 
     def visit_lambda_expr(self, node: LambdaExpr) -> LambdaExpr:
         new = LambdaExpr([self.copy_argument(arg) for arg in node.arguments],
-                       self.block(node.body),
-                       cast(FunctionLike, self.optional_type(node.type)))
+                         self.block(node.body),
+                         cast(Optional[FunctionLike], self.optional_type(node.type)))
         self.copy_function_attributes(new, node)
         return new
 
@@ -154,6 +154,10 @@ class TransformVisitor(NodeVisitor[Node]):
         new._fullname = node._fullname
         new.type = self.optional_type(node.type)
         new.info = node.info
+        new.is_static = node.is_static
+        new.is_class = node.is_class
+        new.is_property = node.is_property
+        new.is_final = node.is_final
         if node.impl:
             new.impl = cast(OverloadPart, node.impl.accept(self))
         return new
@@ -202,6 +206,10 @@ class TransformVisitor(NodeVisitor[Node]):
         new.is_staticmethod = node.is_staticmethod
         new.is_classmethod = node.is_classmethod
         new.is_property = node.is_property
+        new.is_final = node.is_final
+        new.final_value = node.final_value
+        new.final_unset_in_class = node.final_unset_in_class
+        new.final_set_in_init = node.final_set_in_init
         new.set_line(node.line)
         self.var_map[node] = new
         return new
@@ -217,6 +225,7 @@ class TransformVisitor(NodeVisitor[Node]):
                              self.expr(node.rvalue),
                              self.optional_type(node.type))
         new.line = node.line
+        new.is_final_def = node.is_final_def
         return new
 
     def visit_operator_assignment_stmt(self,
@@ -401,7 +410,7 @@ class TransformVisitor(NodeVisitor[Node]):
         return ListExpr(self.expressions(node.items))
 
     def visit_dict_expr(self, node: DictExpr) -> DictExpr:
-        return DictExpr([(self.expr(key), self.expr(value))
+        return DictExpr([(self.expr(key) if key else None, self.expr(value))
                          for key, value in node.items])
 
     def visit_tuple_expr(self, node: TupleExpr) -> TupleExpr:
@@ -475,8 +484,7 @@ class TransformVisitor(NodeVisitor[Node]):
                            self.type(node.upper_bound), variance=node.variance)
 
     def visit_type_alias_expr(self, node: TypeAliasExpr) -> TypeAliasExpr:
-        return TypeAliasExpr(node.type, node.tvars,
-                             fallback=node.fallback, in_runtime=node.in_runtime)
+        return TypeAliasExpr(node.type, node.tvars, node.no_args)
 
     def visit_newtype_expr(self, node: NewTypeExpr) -> NewTypeExpr:
         res = NewTypeExpr(node.name, node.old_type, line=node.line)

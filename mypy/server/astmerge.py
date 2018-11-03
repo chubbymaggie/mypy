@@ -48,7 +48,7 @@ See the main entry point merge_asts for more details.
 from typing import Dict, List, cast, TypeVar, Optional
 
 from mypy.nodes import (
-    Node, MypyFile, SymbolTable, Block, AssignmentStmt, NameExpr, MemberExpr, RefExpr, TypeInfo,
+    MypyFile, SymbolTable, Block, AssignmentStmt, NameExpr, MemberExpr, RefExpr, TypeInfo,
     FuncDef, ClassDef, NamedTupleExpr, SymbolNode, Var, Statement, SuperExpr, NewTypeExpr,
     OverloadedFuncDef, LambdaExpr, TypedDictExpr, EnumCallExpr, FuncBase, TypeAliasExpr, CallExpr,
     CastExpr,
@@ -256,7 +256,6 @@ class NodeReplaceVisitor(TraverserVisitor):
 
     def visit_type_alias_expr(self, node: TypeAliasExpr) -> None:
         self.fixup_type(node.type)
-        self.fixup_type(node.fallback)
         super().visit_type_alias_expr(node)
 
     # Others
@@ -301,7 +300,8 @@ class NodeReplaceVisitor(TraverserVisitor):
         self.fixup_type(info.tuple_type)
         self.fixup_type(info.typeddict_type)
         info.defn.info = self.fixup(info)
-        info.replaced = self.fixup(info.replaced)
+        if info.replaced:
+            info.replaced = self.fixup(info.replaced)
         replace_nodes_in_symbol_table(info.names, self.replacements)
         for i, item in enumerate(info.mro):
             info.mro[i] = self.fixup(info.mro[i])
@@ -420,8 +420,6 @@ class TypeReplaceVisitor(SyntheticTypeVisitor[None]):
     def fixup(self, node: SN) -> SN:
         if node in self.replacements:
             new = self.replacements[node]
-            # TODO: This may be unnecessary?
-            new.__dict__ = node.__dict__
             return cast(SN, new)
         return node
 
@@ -439,9 +437,6 @@ def replace_nodes_in_symbol_table(symbols: SymbolTable,
                 # Handle them here just in case these aren't exposed through the AST.
                 # TODO: Is this necessary?
                 fixup_var(node.node, replacements)
-        override = node.type_override
-        if override:
-            override.accept(TypeReplaceVisitor(replacements))
 
 
 def fixup_var(node: Var, replacements: Dict[SymbolNode, SymbolNode]) -> None:
